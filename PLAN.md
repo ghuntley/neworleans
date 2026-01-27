@@ -10,10 +10,10 @@ Three separate Rust processes functioning as a single Orleans cluster where:
 ## Non-Goals for MVP
 
 - ~~Persistence (grains are in-memory only)~~ → **Now implemented in Phase 11**
-- ~~Timers~~ → **Now implemented in Phase 12** (Reminders still pending)
+- ~~Timers~~ → **Now implemented in Phase 12**
+- ~~Reminders~~ → **Now implemented in Phase 13**
 - Transactions
 - Streaming
-- Reminders (persistent scheduled callbacks)
 - Observers/Callbacks
 - Complex placement strategies (MVP uses hash-based only)
 - Version tolerance in serialization
@@ -1063,6 +1063,177 @@ registry.dispose_all();
 
 ---
 
+## Phase 13: Grain Reminders ✅
+
+**Objective**: Implement persistent, cluster-aware scheduled callbacks that survive silo restarts and grain deactivations.
+
+**Status**: COMPLETE - 64 unit tests and 1 doc test passing.
+
+### Tasks
+
+- [x] **13.1** Define error types for reminder operations
+  - `ReminderError` enum with variants: NotFound, AlreadyExists, EtagMismatch, PeriodTooShort, InvalidName, NotRemindable, NotInitialized, ShuttingDown, Storage, Serialization, Internal
+  - `ReminderResult<T>` type alias
+
+- [x] **13.2** Implement `ReminderOptions` configuration
+  - `min_reminder_period` (default: 60s)
+  - `refresh_reminder_period` (default: 5 minutes)
+  - `init_timeout` (default: 30s)
+  - `max_reminders_per_silo` (default: 10,000)
+  - `min_due_time` (default: 5s)
+  - Preset: `for_testing()` with shorter intervals
+
+- [x] **13.3** Implement `GrainReminder` handle
+  - Contains `grain_id` and `reminder_name`
+  - `name()`, `grain_id()` accessors
+  - Display trait for logging
+
+- [x] **13.4** Implement `TickStatus` struct
+  - `first_tick_time`, `current_tick_time`, `period` fields
+  - `tick_count()` - number of ticks since first tick
+  - `time_until_next_tick()` - duration until next firing
+
+- [x] **13.5** Implement `ReminderEntry` persistence model
+  - `grain_id`, `reminder_name`, `start_at`, `period`, `etag` fields
+  - `get_next_tick_time()` - calculates next firing time
+  - `get_grain_hash_code()` - for consistent hashing
+  - `should_fire_now()`, `time_until_next_tick()` methods
+  - Serde serialization support
+
+- [x] **13.6** Define `IRemindable` trait
+  - Interface for grains that receive reminder callbacks
+  - `receive_reminder(reminder_name, tick_status)` async method
+
+- [x] **13.7** Define `IReminderTable` trait
+  - Storage interface for reminder persistence
+  - `read_rows(grain_id)` - get all reminders for a grain
+  - `read_row(grain_id, reminder_name)` - get specific reminder
+  - `read_rows_in_range(range)` - get reminders in hash range
+  - `upsert_row(entry)` - insert or update reminder
+  - `remove_row(grain_id, reminder_name, etag)` - delete with ETag check
+  - `clear_table()` - for testing
+
+- [x] **13.8** Define `IReminderRegistry` trait
+  - Grain-facing interface for reminder management
+  - `register_or_update_reminder(name, due_time, period)`
+  - `unregister_reminder(reminder)`
+  - `get_reminder(name)`, `get_reminders()`
+
+- [x] **13.9** Implement `InMemoryReminderTable`
+  - Thread-safe in-memory storage for testing/development
+  - ETag-based optimistic concurrency control
+  - Wildcard ETag ("*") support for forced updates
+  - Hash range filtering for `read_rows_in_range`
+
+- [x] **13.10** Implement `ReminderService`
+  - Manages reminder execution for a silo
+  - `start()`, `stop()` lifecycle methods
+  - `update_owned_range(range)` for membership changes
+  - `register_or_update_reminder()`, `unregister_reminder()`
+  - `get_reminder()`, `get_reminders()`
+  - Background refresh task for reminder assignments
+  - Local timer management for owned reminders
+  - Callback messages via channel for grain notification
+
+### Reminder Characteristics
+- Persistent (survives silo restarts)
+- Cluster-wide (any silo can trigger based on hash ownership)
+- Lower frequency (minimum 1 minute by default)
+- Requires grain to implement `IRemindable` trait
+- Stored in reminder table (pluggable storage backend)
+- Uses consistent hashing for silo assignment
+- ETag-based optimistic concurrency control
+
+### Comparison: Timers vs Reminders
+
+| Feature | Timer | Reminder |
+|---------|-------|----------|
+| Persistence | No | Yes |
+| Survives deactivation | No | Yes |
+| Survives silo restart | No | Yes |
+| Minimum period | Milliseconds | Minutes |
+| Cluster-aware | No | Yes |
+| Storage required | No | Yes |
+| Use case | In-memory polling | Scheduled tasks |
+
+### Crate Structure
+```
+orleans-reminders/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs           # ReminderError, ReminderResult
+│   ├── options.rs         # ReminderOptions configuration
+│   ├── reminder.rs        # GrainReminder, TickStatus, ReminderIdentity
+│   ├── reminder_entry.rs  # ReminderEntry persistence model
+│   ├── traits.rs          # IRemindable, IReminderTable, IReminderRegistry
+│   ├── memory_table.rs    # InMemoryReminderTable
+│   └── service.rs         # ReminderService
+```
+
+### Tests
+- Unit tests: error types (5 tests)
+- Unit tests: reminder options (5 tests)
+- Unit tests: reminder and tick status (10 tests)
+- Unit tests: reminder entry (12 tests)
+- Unit tests: in-memory table (14 tests)
+- Unit tests: reminder service (12 tests)
+- Unit tests: trait accessibility (4 tests)
+- Async tests: reminder firing and scheduling
+
+### Usage Example
+```rust
+use orleans_reminders::{
+    ReminderService, InMemoryReminderTable, ReminderOptions,
+    IRemindable, TickStatus, ReminderResult,
+};
+use std::sync::Arc;
+use std::time::Duration;
+
+// Implement IRemindable for your grain
+struct MyGrain {
+    counter: u32,
+}
+
+#[async_trait::async_trait]
+impl IRemindable for MyGrain {
+    async fn receive_reminder(
+        &mut self,
+        reminder_name: &str,
+        tick_status: TickStatus,
+    ) -> ReminderResult<()> {
+        println!("Reminder {} fired, tick count: {}",
+            reminder_name, tick_status.tick_count());
+        Ok(())
+    }
+}
+
+// Create and use the reminder service
+async fn example() {
+    let table = Arc::new(InMemoryReminderTable::new());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let options = ReminderOptions::default();
+
+    let service = ReminderService::new(silo_address, table, tx, options);
+    service.start().await.unwrap();
+
+    // Register a reminder
+    service.register_or_update_reminder(
+        &grain_id,
+        "daily-check",
+        Duration::from_secs(60),   // first tick in 1 minute
+        Duration::from_secs(3600), // then every hour
+    ).await.unwrap();
+
+    // Later, unregister
+    service.unregister_reminder(&grain_id, "daily-check").await.unwrap();
+
+    service.stop().await.unwrap();
+}
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -1078,6 +1249,7 @@ orleans-rs/
 ├── orleans-telemetry/      # Structured logging
 ├── orleans-persistence/    # Grain state persistence
 ├── orleans-timers/         # Grain timers
+├── orleans-reminders/      # Grain reminders (persistent)
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
 ```
@@ -1124,10 +1296,13 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 380+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 18 host)
+7. ✅ **All tests pass** - 440+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 18 host)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
+
+9. ✅ **Grain reminders** - Persistent scheduled callbacks that survive silo restarts
+   - Verified by: `orleans-reminders` crate with 64 unit tests and 1 doc test
 
 ---
 
@@ -1156,6 +1331,8 @@ Phase 10 (Telemetry)   ←── All above phases (observability layer)
 Phase 11 (Persistence) ←── Phase 1 (Identity) + serde
 
 Phase 12 (Timers)      ←── tokio (standalone, integrates with Runtime)
+
+Phase 13 (Reminders)   ←── Phase 1 (Identity) + Phase 5 (Directory) + tokio
 ```
 
 Estimated complexity: ~8,000-12,000 lines of Rust code for MVP.
