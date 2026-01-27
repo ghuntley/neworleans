@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use orleans_clustering::TcpMembershipTable;
-use orleans_core::{GrainId, GrainType, IdSpan};
+use orleans_clustering::{MembershipVersion, TcpMembershipTable};
+use orleans_core::{GrainAddress, GrainId, GrainType, IdSpan};
 use orleans_host::{
     GrainTypeData, IGrain, IGrainActivator, IGrainContext, IGrainMethodInvoker, RuntimeResult,
     SiloBuilder,
@@ -145,6 +145,10 @@ struct CliArgs {
     membership_server: String,
     test_mode: bool,
     test_grain_key: Option<String>,
+    /// Wait for N silos in the cluster before proceeding
+    wait_for_cluster: Option<usize>,
+    /// Create a grain locally (first call will activate it here)
+    create_grain: Option<String>,
 }
 
 fn parse_args() -> CliArgs {
@@ -153,6 +157,8 @@ fn parse_args() -> CliArgs {
     let mut membership_server = "127.0.0.1:5000".to_string();
     let mut test_mode = false;
     let mut test_grain_key = None;
+    let mut wait_for_cluster = None;
+    let mut create_grain = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -178,6 +184,18 @@ fn parse_args() -> CliArgs {
                     i += 1;
                 }
             }
+            "--wait-for-cluster" => {
+                if i + 1 < args.len() {
+                    wait_for_cluster = args[i + 1].parse().ok();
+                    i += 1;
+                }
+            }
+            "--create-grain" => {
+                if i + 1 < args.len() {
+                    create_grain = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
             "--help" | "-h" => {
                 println!("Orleans Silo Process");
                 println!();
@@ -189,6 +207,8 @@ fn parse_args() -> CliArgs {
                 println!("    -m, --membership-server <ADDR>      Membership server address (default: 127.0.0.1:5000)");
                 println!("    --test                              Run in test mode (auto-shutdown)");
                 println!("    --test-grain <KEY>                  Invoke test grain with given key");
+                println!("    --wait-for-cluster <N>              Wait for N silos in cluster before proceeding");
+                println!("    --create-grain <KEY>                Create a grain locally with given key");
                 println!("    -h, --help                          Show this help message");
                 std::process::exit(0);
             }
@@ -202,6 +222,8 @@ fn parse_args() -> CliArgs {
         membership_server,
         test_mode,
         test_grain_key,
+        wait_for_cluster,
+        create_grain,
     }
 }
 
@@ -277,6 +299,88 @@ async fn main() {
     println!("  Silo Address: {}", silo_addr);
     println!("  State:        {:?}", silo.state());
     println!();
+
+    // Wait for cluster formation if requested
+    if let Some(required_silos) = args.wait_for_cluster {
+        println!("Waiting for {} silos in cluster...", required_silos);
+        let mm = silo.membership_manager().expect("Membership manager should be available");
+        let max_wait = std::time::Duration::from_secs(30);
+        let start = std::time::Instant::now();
+
+        loop {
+            // Refresh membership to get latest state
+            if let Err(e) = mm.refresh().await {
+                eprintln!("Warning: Failed to refresh membership: {}", e);
+            }
+
+            let snapshot = mm.get_snapshot();
+            let active_count = snapshot.get_active_silos().len();
+
+            if active_count >= required_silos {
+                println!("  Cluster ready: {} silos active", active_count);
+
+                // Update directory ring with all active silos
+                let dir = silo.directory().expect("Directory should be available");
+                for silo_addr in snapshot.get_active_silos() {
+                    if !dir.ring().contains_silo(silo_addr) {
+                        dir.ring().add_silo(silo_addr.clone());
+                    }
+                }
+                println!("  Directory ring updated: {} silos", dir.ring().silo_count());
+                break;
+            }
+
+            if start.elapsed() > max_wait {
+                eprintln!("Timeout waiting for cluster formation (got {} of {} silos)",
+                    active_count, required_silos);
+                std::process::exit(1);
+            }
+
+            println!("  Currently {} silos, waiting...", active_count);
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
+
+    // Create a grain locally if requested
+    if let Some(grain_key) = &args.create_grain {
+        println!("=== Creating grain locally: {} ===", grain_key);
+
+        let grain_id = GrainId::new(CounterGrain::grain_type(), IdSpan::from_str(grain_key));
+        let catalog = silo.catalog().expect("Catalog should be available");
+        let dir = silo.directory().expect("Directory should be available");
+
+        // Create the activation locally
+        match catalog.get_or_create_activation(&grain_id) {
+            Ok(handle) => {
+                println!("  Created activation: {}", handle.activation_id());
+
+                // Register in directory so other silos can find it
+                let grain_address = GrainAddress::complete(
+                    grain_id.clone(),
+                    handle.activation_id().clone(),
+                    silo.address().clone(),
+                );
+
+                if let Err(e) = dir.register(
+                    MembershipVersion::default(),
+                    grain_address.clone(),
+                    None,
+                ).await {
+                    eprintln!("  Warning: Failed to register in directory: {}", e);
+                } else {
+                    println!("  Registered in directory");
+                }
+
+                // Output JSON for test coordination
+                println!("{{\"event\":\"grain_created\",\"grain_id\":\"{}\",\"silo\":\"{}\",\"activation_id\":\"{}\"}}",
+                    grain_id, silo.address(), handle.activation_id());
+            }
+            Err(e) => {
+                eprintln!("  Failed to create grain: {:?}", e);
+                println!("{{\"event\":\"grain_create_failed\",\"error\":\"{:?}\"}}", e);
+            }
+        }
+    }
 
     // If test mode with grain key, run the test
     if let Some(grain_key) = args.test_grain_key {

@@ -264,8 +264,14 @@ impl ActivationData {
     }
 
     /// Enqueue a message for processing.
+    ///
+    /// Messages can be enqueued while the activation is in Creating, Activating, or Valid state.
+    /// They will be queued and processed once the activation worker starts processing.
+    /// Messages are rejected if the activation is deactivating or already invalid.
     pub fn enqueue_message(&self, message: PendingMessage) -> RuntimeResult<()> {
-        if !self.can_receive_messages() && self.state() != ActivationState::Activating {
+        let state = self.state();
+        // Reject if deactivating or terminal - the activation can't process messages anymore
+        if state.is_deactivating() || state.is_terminal() {
             return Err(RuntimeError::ActivationDeactivating {
                 activation_id: self.activation_id.clone(),
             });

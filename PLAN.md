@@ -700,6 +700,16 @@ orleans-host/
   - Verifies cluster membership visible across processes
   - **Implemented in**: `test_three_process_cluster_formation` (orleans-host/tests/multi_process_test.rs)
 
+- [x] **9.6.1** Cross-process grain invocation ✅ (NEW - MVP Complete!)
+  - Three separate OS processes form a cluster with grain routing
+  - Process 1 creates and hosts a CounterGrain
+  - Process 2 invokes increment() on the grain → returns 1
+  - Process 3 invokes increment() on the grain → returns 2
+  - Proves single activation guarantee across separate processes
+  - Proves location transparency (callers don't know which process hosts the grain)
+  - **Implemented in**: `test_cross_process_grain_invocation` (orleans-host/tests/cross_process_grain_test.rs)
+  - **Additional tests**: `test_single_silo_grain_creation`, `test_single_silo_grain_invocation`
+
 - [ ] **9.7** Silo failure handling (Future work)
   - Start 3 silos, create grain
   - Kill silo hosting grain
