@@ -739,9 +739,14 @@ orleans-host/
   - Call from another silo, verify state persists
   - Verify no cross-grain state leakage
 
-- [ ] **9.9** Concurrent grain calls (Future work)
+- [x] **9.9** Concurrent grain calls ✅
   - Many simultaneous calls to same grain
   - Verify turn-based execution (no races)
+  - **Implemented in**: `concurrent_calls_test.rs` (orleans-host/tests/)
+  - **Tests**:
+    - `test_many_concurrent_calls_single_silo` - 100 concurrent increments, values 1..100, max concurrent = 1
+    - `test_interleaved_read_write_operations` - 50 interleaved read/write pairs, no race conditions
+    - `test_counter_invariants_property` - Property-based test for counter invariants (10, 25, 50, 75 calls)
 
 ### Property-Based Tests (Future work)
 
