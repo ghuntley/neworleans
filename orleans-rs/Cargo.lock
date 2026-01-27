@@ -437,6 +437,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "orleans-codegen"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "orleans-core",
+ "orleans-messaging",
+ "orleans-runtime",
+ "proc-macro2",
+ "quote",
+ "syn",
+ "tokio",
+]
+
+[[package]]
 name = "orleans-core"
 version = "0.1.0"
 dependencies = [
@@ -482,6 +497,8 @@ dependencies = [
  "orleans-serialization",
  "parking_lot",
  "proptest",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
  "tokio-test",
