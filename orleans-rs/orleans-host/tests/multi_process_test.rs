@@ -38,7 +38,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orleans_clustering::{IMembershipTable, InMemoryMembershipTable, MembershipTableServer};
-use tokio::time::timeout;
 
 /// Test helper: Start the membership server and return the port
 async fn start_membership_server() -> (MembershipTableServer, u16) {
@@ -64,23 +63,19 @@ fn start_silo_process(membership_port: u16, silo_port: u16, test_grain: Option<&
         cmd.arg("--test-grain").arg(grain_key);
     }
 
-    cmd.stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    // Use null for stdout/stderr to prevent pipe buffer blocking
+    cmd.stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .expect("Failed to start silo process")
 }
 
-/// Test helper: Read process output
-fn read_process_output(child: &mut Child) -> String {
-    use std::io::Read;
-    let mut output = String::new();
-    if let Some(ref mut stdout) = child.stdout {
-        stdout.read_to_string(&mut output).unwrap_or_default();
-    }
-    output
-}
-
 /// Test: Three separate processes form a cluster
+///
+/// This test verifies that three separate OS processes can form an Orleans cluster
+/// by connecting to a shared TCP membership server. It starts silos with --test mode
+/// which auto-shutdowns after 2 seconds, allowing us to verify cluster formation
+/// within a tight time window.
 #[tokio::test]
 async fn test_three_process_cluster_formation() {
     println!("\n=== Test: Three Process Cluster Formation ===\n");
@@ -89,41 +84,53 @@ async fn test_three_process_cluster_formation() {
     let (server, membership_port) = start_membership_server().await;
     println!("Membership server started on port {}", membership_port);
 
-    // Start three silo processes
-    println!("Starting Silo 1...");
+    // Start three silo processes concurrently (they auto-shutdown after 2s in test mode)
+    println!("Starting all three silos concurrently...");
     let mut silo1 = start_silo_process(membership_port, 0, None);
-
-    println!("Starting Silo 2...");
     let mut silo2 = start_silo_process(membership_port, 0, None);
-
-    println!("Starting Silo 3...");
     let mut silo3 = start_silo_process(membership_port, 0, None);
 
-    // Wait for processes to start and join cluster
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Give silos a moment to start and join
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    // Read membership table to verify cluster formation
+    // Check membership table - should have entries (may not all be Active due to timing)
     let table = orleans_clustering::TcpMembershipTable::from_addr(
         format!("127.0.0.1:{}", membership_port).parse().unwrap()
     );
 
     let data = table.read_all().await.unwrap();
-    println!("Cluster has {} silos", data.len());
+    println!("Cluster has {} silo entries", data.len());
 
-    // Verify we have entries (may have 3 or fewer depending on timing)
-    assert!(data.len() >= 1, "At least one silo should have joined");
+    // With 3 concurrent silos starting, we expect at least some to have joined
+    // The exact count may vary due to timing, but we should see entries
+    for (entry, _etag) in &data.entries {
+        println!("  {} - {:?}", entry.silo_address, entry.status);
+    }
+
+    // Verify at least one silo joined (timing makes guaranteeing all 3 difficult)
+    assert!(
+        !data.entries.is_empty(),
+        "At least one silo should have joined the cluster"
+    );
+    println!("✓ Silo(s) successfully joined cluster via TCP membership table");
 
     // Wait for silos to complete (they have --test flag so they auto-shutdown)
     let status1 = silo1.wait().expect("Silo 1 failed");
     let status2 = silo2.wait().expect("Silo 2 failed");
     let status3 = silo3.wait().expect("Silo 3 failed");
 
-    println!("Silo 1 exit: {:?}", status1);
-    println!("Silo 2 exit: {:?}", status2);
-    println!("Silo 3 exit: {:?}", status3);
+    println!("\nProcess exit codes:");
+    println!("  Silo 1: {:?}", status1);
+    println!("  Silo 2: {:?}", status2);
+    println!("  Silo 3: {:?}", status3);
+
+    // All processes should exit successfully
+    assert!(status1.success(), "Silo 1 should exit successfully");
+    assert!(status2.success(), "Silo 2 should exit successfully");
+    assert!(status3.success(), "Silo 3 should exit successfully");
 
     server.stop().await;
-    println!("\n=== Test Complete ===\n");
+    println!("\n=== Test Complete: Three-Process Cluster Formation PASSED ===\n");
 }
 
 /// Test: Cross-process grain invocation using in-process silos

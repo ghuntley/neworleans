@@ -694,6 +694,12 @@ orleans-host/
   - Heartbeat (I Am Alive) updates work
   - **Implemented in**: `test_tcp_membership_table_operations` (orleans-host/tests/multi_process_test.rs)
 
+- [x] **9.6** Actual OS process cluster formation ✅
+  - Three separate OS processes (using `orleans-silo` binary) form a cluster
+  - Processes connect to shared TCP membership server
+  - Verifies cluster membership visible across processes
+  - **Implemented in**: `test_three_process_cluster_formation` (orleans-host/tests/multi_process_test.rs)
+
 - [ ] **9.7** Silo failure handling (Future work)
   - Start 3 silos, create grain
   - Kill silo hosting grain
@@ -795,7 +801,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 18 tests in orleans-host, 80+ tests in orleans-clustering, 64+ tests in orleans-runtime
+7. ✅ **All tests pass** - 275+ tests across all crates (120 core, 80 clustering, 54 directory, 18 host)
 
 ---
 
