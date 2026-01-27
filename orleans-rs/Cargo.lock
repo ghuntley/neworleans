@@ -678,6 +678,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "orleans-transactions"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "dashmap",
+ "futures",
+ "orleans-core",
+ "orleans-persistence",
+ "parking_lot",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

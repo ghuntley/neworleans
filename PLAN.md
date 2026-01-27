@@ -14,7 +14,7 @@ Three separate Rust processes functioning as a single Orleans cluster where:
 - ~~Reminders~~ → **Now implemented in Phase 13**
 - ~~Observers/Callbacks~~ → **Now implemented in Phase 15**
 - ~~Streaming~~ → **Now implemented in Phase 16**
-- Transactions
+- ~~Transactions~~ → **Now implemented in Phase 17**
 - Complex placement strategies (MVP uses hash-based only)
 - Version tolerance in serialization
 - TLS/Security
@@ -1630,6 +1630,132 @@ async fn example() -> StreamResult<()> {
 
 ---
 
+## Phase 17: Transactions ✅
+
+**Objective**: Implement ACID transactions using an asymmetric Two-Phase Commit (2PC) protocol for distributed state consistency.
+
+**Status**: COMPLETE - 100 unit tests passing.
+
+### Tasks
+
+- [x] **17.1** Define error types for transaction operations
+  - `TransactionalStatus` enum with status codes (Ok, PrepareTimeout, CascadingAbort, BrokenLock, etc.)
+  - `TransactionError` enum for error handling
+  - `AbortedReason` enum for abort causes
+
+- [x] **17.2** Implement `TransactionalStateOptions` and `TransactionAgentOptions`
+  - Configurable timeouts: lock_timeout, prepare_timeout, lock_acquire_timeout
+  - Max lock group size, cleanup intervals
+  - Testing presets with shorter timeouts
+
+- [x] **17.3** Implement `CausalClock`
+  - Monotonically increasing timestamps for causal ordering
+  - `utc_now()` returns unique timestamp > previous
+  - `merge_utc_now(external)` for cross-node timestamp synchronization
+  - Lock-free implementation using AtomicI64
+
+- [x] **17.4** Implement transaction identity types
+  - `TransactionId` with UUID backing
+  - `ParticipantId` with grain ID and role capabilities
+  - `AccessCounter` for read/write tracking
+  - `TransactionInfo` for full transaction metadata
+  - `Role` enum: Resource, Manager, PriorityManager
+
+- [x] **17.5** Implement `ReaderWriterLock` with lock groups
+  - `LockGroup<TState>` for concurrent non-conflicting transactions
+  - Conflict detection: Read-Read (no conflict), Read-Write/Write-Write (conflict)
+  - Priority-based conflict resolution (earlier timestamp wins)
+  - Copy-on-write semantics for isolation
+  - `TransactionRecord` for per-transaction state
+
+- [x] **17.6** Define storage interfaces
+  - `ITransactionalStateStorage` trait for persistence
+  - `PendingTransactionState` for uncommitted changes
+  - `TransactionalStateMetaData` with commit records
+  - `StorageBatch` for batch operations
+  - `InMemoryTransactionalStorage` for testing
+
+- [x] **17.7** Implement `TransactionalState<TState>`
+  - `ITransactionalState` trait with `perform_read()` and `perform_update()`
+  - Integration with `ReaderWriterLock` for concurrency control
+  - `prepare()`, `commit()`, `abort()`, `confirm()` lifecycle methods
+  - Storage persistence for durability
+
+- [x] **17.8** Implement `TransactionAgent`
+  - Orchestrates 2PC protocol from client side
+  - `start_transaction(read_only, timeout)` creates new transaction
+  - `resolve(tx_id)` triggers commit protocol
+  - Read-only transactions use 1-phase commit
+  - Read-write transactions use 2-phase commit
+  - `TransactionOverloadDetector` for backpressure
+
+### Crate Structure
+```
+orleans-transactions/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs            # TransactionalStatus, TransactionError, AbortedReason
+│   ├── options.rs          # TransactionalStateOptions, TransactionAgentOptions
+│   ├── clock.rs            # CausalClock
+│   ├── transaction_info.rs # TransactionId, ParticipantId, AccessCounter, TransactionInfo
+│   ├── lock.rs             # ReaderWriterLock, LockGroup, TransactionRecord
+│   ├── storage.rs          # ITransactionalStateStorage, InMemoryTransactionalStorage
+│   ├── transactional_state.rs # TransactionalState, ITransactionalState
+│   └── agent.rs            # TransactionAgent, TransactionOverloadDetector
+```
+
+### Tests
+- Unit tests: error types (8 tests)
+- Unit tests: options (6 tests)
+- Unit tests: causal clock (11 tests)
+- Unit tests: transaction info (16 tests)
+- Unit tests: lock groups (13 tests)
+- Unit tests: storage (10 tests)
+- Unit tests: transactional state (10 tests)
+- Unit tests: transaction agent (13 tests)
+- Integration tests: full transaction flow (8 tests)
+- Property tests: clock monotonicity, timestamp uniqueness
+
+### Usage Example
+```rust
+use orleans_transactions::{
+    TransactionAgent, TransactionalState, ITransactionalState,
+    TransactionAgentOptions, TransactionalStateOptions,
+    InMemoryTransactionalStorage,
+};
+use std::sync::Arc;
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct BankAccount {
+    balance: i64,
+}
+
+// Create transaction infrastructure
+let agent = TransactionAgent::new(TransactionAgentOptions::default());
+let storage = Arc::new(InMemoryTransactionalStorage::<BankAccount>::new());
+let state = TransactionalState::new(grain_id, "balance", storage, options);
+
+// Activate grain
+state.on_activate().await?;
+
+// Start transaction
+let info = agent.start_transaction(false, None)?;
+
+// Perform operations
+state.perform_update(info.transaction_id, |s| {
+    s.balance += 100;
+}).await?;
+
+// Commit
+state.commit(info.transaction_id).await?;
+
+// Or abort
+state.abort(info.transaction_id, None).await?;
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -1649,6 +1775,7 @@ orleans-rs/
 ├── orleans-filters/        # Call filters and interceptors
 ├── orleans-observers/      # Observers and callbacks
 ├── orleans-streaming/      # Reactive pub/sub streaming
+├── orleans-transactions/   # ACID transactions with 2PC
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
 ```
@@ -1695,7 +1822,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 691+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 40 host including 22 property tests)
+7. ✅ **All tests pass** - 791+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 40 host including 22 property tests)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -1717,6 +1844,10 @@ The MVP is complete! All core criteria have been achieved:
       - Grain identity properties (equality, hashing, parse/display roundtrip)
       - Directory consistency (register/lookup/unregister invariants)
       - Message delivery guarantees (no loss, no duplicates, data integrity)
+
+14. ✅ **ACID Transactions** - Two-phase commit protocol for distributed state consistency
+    - Verified by: `orleans-transactions` crate with 100 unit tests
+    - Features: CausalClock, ReaderWriterLock, TransactionAgent, TransactionalState
 
 ---
 
@@ -1753,6 +1884,8 @@ Phase 14 (Filters)     ←── Phase 1 (Identity) + Phase 3 (Messaging) + toki
 Phase 15 (Observers)   ←── Phase 1 (Identity) + tokio
 
 Phase 16 (Streaming)   ←── Phase 1 (Identity) + Phase 15 (Observers) + tokio
+
+Phase 17 (Transactions) ←── Phase 1 (Identity) + Phase 11 (Persistence) + tokio
 ```
 
-Estimated complexity: ~12,000-18,000 lines of Rust code.
+Estimated complexity: ~15,000-22,000 lines of Rust code.

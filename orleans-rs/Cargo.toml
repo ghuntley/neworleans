@@ -15,6 +15,7 @@ members = [
     "orleans-filters",
     "orleans-observers",
     "orleans-streaming",
+    "orleans-transactions",
     "orleans-host",
 ]
 

@@ -1,0 +1,27 @@
+[package]
+name = "orleans-transactions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ACID transactions for Orleans Rust - Two-Phase Commit protocol implementation"
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+orleans-persistence = { path = "../orleans-persistence" }
+
+tokio = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+proptest = { workspace = true }
