@@ -1,0 +1,47 @@
+[package]
+name = "orleans-streaming"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Orleans streaming: reactive pub/sub messaging for distributed systems"
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Data structures
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+lru = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Identity and hashing
+uuid = { workspace = true }
+xxhash-rust = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Optional regex support for namespace predicates
+regex = { version = "1.10", optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+proptest = { workspace = true }
+
+[features]
+default = []
+regex-predicates = ["regex"]

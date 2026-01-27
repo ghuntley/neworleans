@@ -13,8 +13,8 @@ Three separate Rust processes functioning as a single Orleans cluster where:
 - ~~Timers~~ → **Now implemented in Phase 12**
 - ~~Reminders~~ → **Now implemented in Phase 13**
 - ~~Observers/Callbacks~~ → **Now implemented in Phase 15**
+- ~~Streaming~~ → **Now implemented in Phase 16**
 - Transactions
-- Streaming
 - Complex placement strategies (MVP uses hash-based only)
 - Version tolerance in serialization
 - TLS/Security
@@ -1492,6 +1492,137 @@ manager.deregister(&observer_id).unwrap();
 
 ---
 
+## Phase 16: Streaming ✅
+
+**Objective**: Implement reactive pub/sub messaging for processing sequences of events with support for multiple stream providers.
+
+**Status**: COMPLETE - 51 unit tests and 1 doc test passing.
+
+### Tasks
+
+- [x] **16.1** Define error types for streaming operations
+  - `StreamError` enum with variants: SubscriptionNotFound, ProviderNotFound, StreamCompleted, StreamErrored, QueueAdapterError, Serialization, DeliveryFailed, FilterError, Timeout, ChannelClosed, ShuttingDown, CacheMiss, Internal
+  - `StreamResult<T>` type alias
+  - `DeliveryStatus` enum for tracking delivery outcomes
+
+- [x] **16.2** Implement stream identity types
+  - `StreamKey` enum: Guid, String, Integer
+  - `StreamId` struct with namespace + key
+  - `StreamSequenceToken` for checkpointing (sequence_number + event_index)
+  - `QualifiedStreamId` with provider name
+
+- [x] **16.3** Define core streaming traits
+  - `IAsyncObserver<T>` for receiving individual events
+  - `IAsyncBatchObserver<T>` for batch event handling
+  - `IAsyncStream<T>` for producing and consuming events
+  - `StreamFilter` for selective event delivery
+  - `AnyStreamItem` trait for type-erased streaming
+
+- [x] **16.4** Implement subscription management
+  - `StreamSubscriptionHandle` for managing subscriptions
+  - `SubscriptionState` for internal tracking
+  - `SubscriptionMarker` for implicit vs explicit subscriptions
+  - `PubSubSubscriptionState` for consumer tracking
+
+- [x] **16.5** Define stream provider interfaces
+  - `IStreamProvider` trait with lifecycle methods
+  - `StreamHandle` for type-erased stream access
+  - `StreamProviderDirection` enum (ReadOnly, WriteOnly, ReadWrite)
+  - `StreamProviderRegistry` for managing multiple providers
+
+- [x] **16.6** Implement memory stream provider
+  - `MemoryStreamProvider` for testing and development
+  - In-memory message queuing with sequence tokens
+  - Immediate delivery to subscribers
+  - Stream completion and error signaling
+
+- [x] **16.7** Implement configuration options
+  - `StreamPullingAgentOptions` for queue polling
+  - `StreamLifecycleOptions` for timeouts
+  - `StreamPubSubOptions` for subscription types
+  - `StreamCacheEvictionOptions` for cache management
+
+### Crate Structure
+```
+orleans-streaming/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs           # StreamError, StreamResult, DeliveryStatus
+│   ├── stream_id.rs       # StreamId, StreamKey, StreamSequenceToken
+│   ├── traits.rs          # IAsyncObserver, IAsyncStream, StreamFilter
+│   ├── subscription.rs    # StreamSubscriptionHandle, SubscriptionState
+│   ├── provider.rs        # IStreamProvider, StreamProviderRegistry
+│   ├── memory_provider.rs # MemoryStreamProvider
+│   └── options.rs         # Configuration options
+```
+
+### Tests
+- Unit tests: error types (3 tests)
+- Unit tests: stream identity (17 tests)
+- Unit tests: traits (3 tests)
+- Unit tests: subscription (6 tests)
+- Unit tests: provider (3 tests)
+- Unit tests: memory provider (9 tests)
+- Unit tests: options (6 tests)
+- Integration tests: end-to-end streaming (2 tests)
+- Doc tests: public API examples (1 test)
+
+### Usage Example
+```rust
+use orleans_streaming::{
+    MemoryStreamProvider, StreamId, IAsyncObserver, StreamSequenceToken,
+    StreamError, StreamResult, IStreamProvider, StreamHandle,
+};
+use std::sync::Arc;
+use async_trait::async_trait;
+
+#[derive(Debug)]
+struct MyObserver;
+
+#[async_trait]
+impl IAsyncObserver<serde_json::Value> for MyObserver {
+    async fn on_next(
+        &self,
+        item: serde_json::Value,
+        token: Option<StreamSequenceToken>,
+    ) -> StreamResult<()> {
+        println!("Received: {:?}", item);
+        Ok(())
+    }
+
+    async fn on_completed(&self) -> StreamResult<()> {
+        println!("Stream completed");
+        Ok(())
+    }
+
+    async fn on_error(&self, error: StreamError) -> StreamResult<()> {
+        println!("Stream error: {}", error);
+        Ok(())
+    }
+}
+
+async fn example() -> StreamResult<()> {
+    // Create provider
+    let provider = Arc::new(MemoryStreamProvider::new("MyProvider"));
+    provider.start().await?;
+
+    // Get stream and subscribe
+    let stream = provider.get_stream(StreamId::create("orders", "customer-123"));
+    let handle = stream.subscribe_any(Arc::new(MyObserver)).await?;
+
+    // Publish events
+    stream.on_next_any(serde_json::json!({"order_id": 1})).await?;
+
+    // Cleanup
+    handle.unsubscribe().await?;
+    provider.stop().await?;
+    Ok(())
+}
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -1510,6 +1641,7 @@ orleans-rs/
 ├── orleans-reminders/      # Grain reminders (persistent)
 ├── orleans-filters/        # Call filters and interceptors
 ├── orleans-observers/      # Observers and callbacks
+├── orleans-streaming/      # Reactive pub/sub streaming
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
 ```
@@ -1556,7 +1688,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 618+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 18 host)
+7. ✅ **All tests pass** - 669+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 18 host)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -1569,6 +1701,9 @@ The MVP is complete! All core criteria have been achieved:
 
 11. ✅ **Observers and callbacks** - Pub/sub communication for grains
     - Verified by: `orleans-observers` crate with 91 unit tests and 2 doc tests
+
+12. ✅ **Streaming** - Reactive pub/sub messaging for event processing
+    - Verified by: `orleans-streaming` crate with 51 unit tests and 1 doc test
 
 ---
 
@@ -1603,6 +1738,8 @@ Phase 13 (Reminders)   ←── Phase 1 (Identity) + Phase 5 (Directory) + toki
 Phase 14 (Filters)     ←── Phase 1 (Identity) + Phase 3 (Messaging) + tokio
 
 Phase 15 (Observers)   ←── Phase 1 (Identity) + tokio
+
+Phase 16 (Streaming)   ←── Phase 1 (Identity) + Phase 15 (Observers) + tokio
 ```
 
-Estimated complexity: ~10,000-15,000 lines of Rust code.
+Estimated complexity: ~12,000-18,000 lines of Rust code.
