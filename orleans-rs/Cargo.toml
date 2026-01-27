@@ -6,6 +6,7 @@ members = [
     "orleans-messaging",
     "orleans-clustering",
     "orleans-directory",
+    "orleans-runtime",
 ]
 
 [workspace.package]

@@ -65,9 +65,29 @@ pub struct Message {
 #[derive(Debug, Clone)]
 pub struct RejectionInfo {
     /// The type of rejection.
-    pub rejection_type: RejectionType,
+    rejection_type: RejectionType,
     /// Human-readable rejection message.
-    pub message: String,
+    message: String,
+}
+
+impl RejectionInfo {
+    /// Create a new rejection info.
+    pub fn new(rejection_type: RejectionType, message: String) -> Self {
+        Self {
+            rejection_type,
+            message,
+        }
+    }
+
+    /// Returns the rejection type.
+    pub fn rejection_type(&self) -> RejectionType {
+        self.rejection_type
+    }
+
+    /// Returns the rejection message.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 /// Types of message rejection.
@@ -139,7 +159,7 @@ impl Message {
     }
 
     /// Creates a response message for a request.
-    pub fn create_response(&self, body: Bytes) -> Self {
+    pub fn create_response(&self, body: Bytes, sending_silo: SiloAddress) -> Self {
         Self {
             id: self.id,
             direction: Direction::Response,
@@ -147,7 +167,7 @@ impl Message {
             target_silo: Some(self.sending_silo.clone()),
             target_activation: self.sending_activation.clone(),
             sending_grain: Some(self.target_grain.clone()),
-            sending_silo: self.target_silo.clone().unwrap_or_else(SiloAddress::zero),
+            sending_silo,
             sending_activation: self.target_activation.clone(),
             interface_type: self.interface_type.clone(),
             method_id: self.method_id,
@@ -159,12 +179,14 @@ impl Message {
     }
 
     /// Creates a rejection response for a request.
-    pub fn create_rejection(&self, rejection_type: RejectionType, message: String) -> Self {
-        let mut response = self.create_response(Bytes::new());
-        response.rejection_info = Some(RejectionInfo {
-            rejection_type,
-            message,
-        });
+    pub fn create_rejection(
+        request: &Message,
+        rejection_type: RejectionType,
+        message: String,
+        sending_silo: SiloAddress,
+    ) -> Self {
+        let mut response = request.create_response(Bytes::new(), sending_silo);
+        response.rejection_info = Some(RejectionInfo::new(rejection_type, message));
         response
     }
 
@@ -230,12 +252,6 @@ impl Message {
         self
     }
 
-    /// Sets the target silo.
-    pub fn with_target_silo(mut self, silo: SiloAddress) -> Self {
-        self.target_silo = Some(silo);
-        self
-    }
-
     /// Sets the target activation.
     pub fn with_target_activation(mut self, activation_id: ActivationId) -> Self {
         self.target_activation = Some(activation_id);
@@ -243,9 +259,67 @@ impl Message {
     }
 
     /// Sets the timeout for this message.
-    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.timeout = Some(timeout);
+    pub fn with_timeout(mut self, timeout: Option<std::time::Duration>) -> Self {
+        self.timeout = timeout;
         self
+    }
+
+    /// Sets the target silo (Option variant).
+    pub fn with_target_silo(mut self, silo: Option<SiloAddress>) -> Self {
+        self.target_silo = silo;
+        self
+    }
+
+    // Accessor methods for read-only access
+
+    /// Returns the correlation ID.
+    pub fn id(&self) -> CorrelationId {
+        self.id
+    }
+
+    /// Returns the direction.
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+
+    /// Returns the target grain.
+    pub fn target_grain(&self) -> &GrainId {
+        &self.target_grain
+    }
+
+    /// Returns the target silo if known.
+    pub fn target_silo(&self) -> Option<&SiloAddress> {
+        self.target_silo.as_ref()
+    }
+
+    /// Returns the sending silo.
+    pub fn sending_silo(&self) -> &SiloAddress {
+        &self.sending_silo
+    }
+
+    /// Returns the interface type.
+    pub fn interface_type(&self) -> &GrainInterfaceType {
+        &self.interface_type
+    }
+
+    /// Returns the method ID.
+    pub fn method_id(&self) -> u32 {
+        self.method_id
+    }
+
+    /// Returns the message body.
+    pub fn body(&self) -> &Bytes {
+        &self.body
+    }
+
+    /// Returns the timeout if set.
+    pub fn timeout(&self) -> Option<std::time::Duration> {
+        self.timeout
+    }
+
+    /// Returns the rejection info if this is a rejection.
+    pub fn rejection_info(&self) -> Option<&RejectionInfo> {
+        self.rejection_info.as_ref()
     }
 }
 
@@ -304,7 +378,7 @@ mod tests {
             test_silo_address(),
         );
 
-        let response = request.create_response(Bytes::from_static(b"response"));
+        let response = request.create_response(Bytes::from_static(b"response"), test_silo_address());
 
         assert!(response.is_response());
         assert_eq!(response.id, request.id);
@@ -322,15 +396,17 @@ mod tests {
             test_silo_address(),
         );
 
-        let rejection = request.create_rejection(
+        let rejection = Message::create_rejection(
+            &request,
             RejectionType::GrainNotFound,
             "Grain not found".to_string(),
+            test_silo_address(),
         );
 
         assert!(rejection.is_response());
         assert!(rejection.is_rejection());
         assert_eq!(
-            rejection.rejection_info.as_ref().unwrap().rejection_type,
+            rejection.rejection_info.as_ref().unwrap().rejection_type(),
             RejectionType::GrainNotFound
         );
     }
@@ -359,7 +435,7 @@ mod tests {
             Bytes::new(),
             test_silo_address(),
         )
-        .with_timeout(std::time::Duration::from_millis(1));
+        .with_timeout(Some(std::time::Duration::from_millis(1)));
 
         // Should not be expired immediately
         assert!(!msg.is_expired());

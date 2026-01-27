@@ -452,6 +452,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "orleans-runtime"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "futures",
+ "orleans-clustering",
+ "orleans-core",
+ "orleans-directory",
+ "orleans-messaging",
+ "orleans-serialization",
+ "parking_lot",
+ "proptest",
+ "thiserror",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "orleans-serialization"
 version = "0.1.0"
 dependencies = [

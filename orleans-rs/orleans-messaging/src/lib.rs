@@ -124,11 +124,11 @@ mod tests {
         silo2.set_message_handler(move |msg| {
             received_count_clone.fetch_add(1, Ordering::Relaxed);
             if msg.is_request() {
-                let response = msg.create_response(Bytes::from(format!("Echo: {:?}", msg.body)));
+                let response = msg.create_response(Bytes::from(format!("Echo: {:?}", msg.body)), silo2_clone.local_address().clone());
                 let silo = Arc::clone(&silo2_clone);
                 let addr = addr1.clone();
                 tokio::spawn(async move {
-                    let _ = silo.send_response(response.with_target_silo(addr)).await;
+                    let _ = silo.send_response(response.with_target_silo(Some(addr))).await;
                 });
             }
         });
@@ -170,11 +170,11 @@ mod tests {
             if msg.is_request() {
                 // Echo back the method_id in the response
                 let response_body = Bytes::from(format!("method_{}", msg.method_id));
-                let response = msg.create_response(response_body);
+                let response = msg.create_response(response_body, silo2_clone.local_address().clone());
                 let silo = Arc::clone(&silo2_clone);
                 let addr = addr1.clone();
                 tokio::spawn(async move {
-                    let _ = silo.send_response(response.with_target_silo(addr)).await;
+                    let _ = silo.send_response(response.with_target_silo(Some(addr))).await;
                 });
             }
         });
@@ -219,11 +219,11 @@ mod tests {
         let silo2_clone = Arc::clone(&silo2);
         silo2.set_message_handler(move |msg| {
             if msg.is_request() {
-                let response = msg.create_response(Bytes::from_static(b"ok"));
+                let response = msg.create_response(Bytes::from_static(b"ok"), silo2_clone.local_address().clone());
                 let silo = Arc::clone(&silo2_clone);
                 let addr = addr1.clone();
                 tokio::spawn(async move {
-                    let _ = silo.send_response(response.with_target_silo(addr)).await;
+                    let _ = silo.send_response(response.with_target_silo(Some(addr))).await;
                 });
             }
         });

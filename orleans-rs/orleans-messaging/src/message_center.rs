@@ -229,8 +229,8 @@ impl MessageCenter {
                                         let result = if message.is_rejection() {
                                             let info = message.rejection_info.as_ref().unwrap();
                                             Err(MessagingError::RequestRejected {
-                                                rejection_type: info.rejection_type,
-                                                message: info.message.clone(),
+                                                rejection_type: info.rejection_type(),
+                                                message: info.message().to_string(),
                                             })
                                         } else {
                                             Ok(message)
@@ -272,8 +272,8 @@ impl MessageCenter {
             body,
             self.local_address.clone(),
         )
-        .with_target_silo(target_silo)
-        .with_timeout(self.config.request_timeout);
+        .with_target_silo(Some(target_silo))
+        .with_timeout(Some(self.config.request_timeout));
 
         self.send_request(message).await
     }
@@ -408,8 +408,8 @@ impl MessageCenter {
                 let result = if message.is_rejection() {
                     let info = message.rejection_info.as_ref().unwrap();
                     Err(MessagingError::RequestRejected {
-                        rejection_type: info.rejection_type,
-                        message: info.message.clone(),
+                        rejection_type: info.rejection_type(),
+                        message: info.message().to_string(),
                     })
                 } else {
                     Ok(message)
@@ -496,10 +496,10 @@ mod tests {
         let center2_clone = Arc::clone(&center2);
         center2.set_message_handler(move |msg| {
             if msg.is_request() {
-                let response = msg.create_response(Bytes::from_static(b"pong"));
+                let response = msg.create_response(Bytes::from_static(b"pong"), center2_clone.local_address().clone());
                 let center = Arc::clone(&center2_clone);
                 tokio::spawn(async move {
-                    let _ = center.send_response(response.with_target_silo(addr1.clone())).await;
+                    let _ = center.send_response(response.with_target_silo(Some(addr1.clone()))).await;
                 });
             }
         });
@@ -546,7 +546,7 @@ mod tests {
             Bytes::new(),
             center2.local_address().clone(),
         )
-        .with_target_silo(addr);
+        .with_target_silo(Some(addr));
 
         center2.send(msg).await.unwrap();
 

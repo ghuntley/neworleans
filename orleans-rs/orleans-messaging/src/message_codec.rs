@@ -158,9 +158,9 @@ fn serialize_message_header(message: &Message, writer: &mut Writer) {
 
     // Field 10: Rejection type (optional)
     if let Some(ref rejection) = message.rejection_info {
-        (rejection.rejection_type as u8).serialize_field(writer, FIELD_REJECTION_TYPE);
+        (rejection.rejection_type() as u8).serialize_field(writer, FIELD_REJECTION_TYPE);
         // Field 11: Rejection message
-        rejection.message.serialize_field(writer, FIELD_REJECTION_MESSAGE);
+        rejection.message().serialize_field(writer, FIELD_REJECTION_MESSAGE);
     }
 
     // Field 12: Timeout in milliseconds (optional)
@@ -262,14 +262,8 @@ fn deserialize_message_header(reader: &mut Reader, body: Bytes) -> Result<Messag
     let method_id = method_id.unwrap_or(0);
 
     let rejection_info = match (rejection_type, rejection_message) {
-        (Some(rt), Some(msg)) => Some(RejectionInfo {
-            rejection_type: rt,
-            message: msg,
-        }),
-        (Some(rt), None) => Some(RejectionInfo {
-            rejection_type: rt,
-            message: String::new(),
-        }),
+        (Some(rt), Some(msg)) => Some(RejectionInfo::new(rt, msg)),
+        (Some(rt), None) => Some(RejectionInfo::new(rt, String::new())),
         _ => None,
     };
 
@@ -343,7 +337,7 @@ mod tests {
         )
         .with_sending_grain(test_grain_id(), Some(ActivationId::new()));
 
-        let response = request.create_response(Bytes::from_static(b"response"));
+        let response = request.create_response(Bytes::from_static(b"response"), test_silo_address());
 
         let encoded = encode_message(&response).unwrap();
         let decoded = decode_message(&encoded).unwrap();
@@ -363,9 +357,11 @@ mod tests {
             test_silo_address(),
         );
 
-        let rejection = request.create_rejection(
+        let rejection = Message::create_rejection(
+            &request,
             RejectionType::GrainNotFound,
             "Test rejection".to_string(),
+            test_silo_address(),
         );
 
         let encoded = encode_message(&rejection).unwrap();
@@ -373,8 +369,8 @@ mod tests {
 
         assert!(decoded.is_rejection());
         let info = decoded.rejection_info.unwrap();
-        assert_eq!(info.rejection_type, RejectionType::GrainNotFound);
-        assert_eq!(info.message, "Test rejection");
+        assert_eq!(info.rejection_type(), RejectionType::GrainNotFound);
+        assert_eq!(info.message(), "Test rejection");
     }
 
     #[test]
@@ -409,7 +405,7 @@ mod tests {
             Bytes::new(),
             test_silo_address(),
         )
-        .with_timeout(std::time::Duration::from_secs(60));
+        .with_timeout(Some(std::time::Duration::from_secs(60)));
 
         let encoded = encode_message(&msg).unwrap();
         let decoded = decode_message(&encoded).unwrap();

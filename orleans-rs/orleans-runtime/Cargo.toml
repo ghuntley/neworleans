@@ -1,0 +1,29 @@
+[package]
+name = "orleans-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Grain runtime for Orleans Rust port - activation management, dispatching, and grain hosting"
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+orleans-serialization = { path = "../orleans-serialization" }
+orleans-messaging = { path = "../orleans-messaging" }
+orleans-clustering = { path = "../orleans-clustering" }
+orleans-directory = { path = "../orleans-directory" }
+
+tokio = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio-test = { workspace = true }
