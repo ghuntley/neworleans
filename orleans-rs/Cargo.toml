@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "orleans-core",
     "orleans-serialization",
+    "orleans-messaging",
 ]
 
 [workspace.package]
@@ -24,3 +25,4 @@ parking_lot = "0.12"
 xxhash-rust = { version = "0.8", features = ["xxh32"] }
 proptest = "1"
 serde = { version = "1", features = ["derive"] }
+tokio-test = "0.4"

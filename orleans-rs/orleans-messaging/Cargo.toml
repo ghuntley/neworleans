@@ -1,0 +1,22 @@
+[package]
+name = "orleans-messaging"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Orleans messaging infrastructure for inter-silo communication"
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+orleans-serialization = { path = "../orleans-serialization" }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+dashmap = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio-test = "0.4"

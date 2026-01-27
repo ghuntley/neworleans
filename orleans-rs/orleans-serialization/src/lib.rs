@@ -13,7 +13,7 @@ mod wire_type;
 mod field;
 mod writer;
 mod reader;
-mod codecs;
+pub mod codecs;
 mod error;
 
 pub use varint::{read_varint, write_varint, zigzag_decode, zigzag_encode};
@@ -21,7 +21,7 @@ pub use wire_type::{ExtendedWireType, SchemaType, WireType};
 pub use field::Field;
 pub use writer::Writer;
 pub use reader::Reader;
-pub use error::SerializationError;
+pub use error::{SerializationError, Result};
 
 pub mod prelude {
     pub use super::codecs::*;

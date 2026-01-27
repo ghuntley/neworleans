@@ -123,16 +123,21 @@ impl Deserialize for GrainId {
 impl FieldSerialize for GrainId {
     fn serialize_field(&self, writer: &mut Writer, field_id: u32) {
         writer.begin_tag_delimited_field(field_id);
+        // begin_tag_delimited_field already resets field ID for nested content
         self.serialize(writer);
         writer.write_end_tag();
+        // Restore field ID to the one we just wrote (for correct delta calculation)
+        writer.set_field_id(field_id);
     }
 }
 
 impl FieldDeserialize for GrainId {
     fn deserialize_field(reader: &mut Reader) -> Result<Self> {
         // The field header (TagDelimited) has already been read
+        let saved_field_id = reader.current_field_id();
         reader.reset_field_id();
         let result = Self::deserialize(reader)?;
+        reader.set_field_id(saved_field_id);
         Ok(result)
     }
 }
@@ -211,15 +216,21 @@ impl Deserialize for SiloAddress {
 impl FieldSerialize for SiloAddress {
     fn serialize_field(&self, writer: &mut Writer, field_id: u32) {
         writer.begin_tag_delimited_field(field_id);
+        // begin_tag_delimited_field already resets field ID for nested content
         self.serialize(writer);
         writer.write_end_tag();
+        // Restore field ID to the one we just wrote (for correct delta calculation)
+        writer.set_field_id(field_id);
     }
 }
 
 impl FieldDeserialize for SiloAddress {
     fn deserialize_field(reader: &mut Reader) -> Result<Self> {
+        let saved_field_id = reader.current_field_id();
         reader.reset_field_id();
-        Self::deserialize(reader)
+        let result = Self::deserialize(reader)?;
+        reader.set_field_id(saved_field_id);
+        Ok(result)
     }
 }
 
@@ -311,15 +322,21 @@ impl Deserialize for GrainAddress {
 impl FieldSerialize for GrainAddress {
     fn serialize_field(&self, writer: &mut Writer, field_id: u32) {
         writer.begin_tag_delimited_field(field_id);
+        // begin_tag_delimited_field already resets field ID for nested content
         self.serialize(writer);
         writer.write_end_tag();
+        // Restore field ID to the one we just wrote (for correct delta calculation)
+        writer.set_field_id(field_id);
     }
 }
 
 impl FieldDeserialize for GrainAddress {
     fn deserialize_field(reader: &mut Reader) -> Result<Self> {
+        let saved_field_id = reader.current_field_id();
         reader.reset_field_id();
-        Self::deserialize(reader)
+        let result = Self::deserialize(reader)?;
+        reader.set_field_id(saved_field_id);
+        Ok(result)
     }
 }
 

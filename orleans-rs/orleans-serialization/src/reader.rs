@@ -58,6 +58,11 @@ impl<'a> Reader<'a> {
         self.current_field_id = 0;
     }
 
+    /// Set the current field ID (for restoring after nested reads).
+    pub fn set_field_id(&mut self, field_id: u32) {
+        self.current_field_id = field_id;
+    }
+
     /// Get the remaining bytes as a slice.
     pub fn remaining_bytes(&self) -> &'a [u8] {
         &self.buffer[self.position..]
