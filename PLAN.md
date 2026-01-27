@@ -571,38 +571,43 @@ orleans-codegen/
 
 ---
 
-## Phase 8: Silo Host
+## Phase 8: Silo Host ✅
 
 **Objective**: Assemble all components into a runnable silo process.
 
+**Status**: COMPLETE - 6 unit tests, 9 integration tests, and 2 doc tests passing.
+
 ### Tasks
 
-- [ ] **8.1** Implement `SiloBuilder`
+- [x] **8.1** Implement `SiloBuilder`
   - Configure silo address, cluster ID
   - Register grain types
   - Configure membership table
 
-- [ ] **8.2** Implement `Silo`
-  - Lifecycle: Start -> Running -> Stopping -> Stopped
+- [x] **8.2** Implement `Silo`
+  - Lifecycle: Created -> Starting -> Running -> Stopping -> Stopped
   - Starts all background services
   - Graceful shutdown
 
-- [ ] **8.3** Implement startup sequence
+- [x] **8.3** Implement startup sequence
   1. Initialize message center and start listening
   2. Connect to membership table
   3. Join cluster (MembershipAgent)
-  4. Start grain directory
-  5. Start dispatcher
-  6. Mark silo as Active
+  4. Start grain directory with consistent hash ring
+  5. Create catalog and register grain types
+  6. Start dispatcher and register message handler
+  7. Start membership change listener
+  8. Mark silo as Running
 
-- [ ] **8.4** Implement shutdown sequence
-  1. Mark silo as ShuttingDown
-  2. Stop accepting new activations
+- [x] **8.4** Implement shutdown sequence
+  1. Mark silo as Stopping
+  2. Signal shutdown to background tasks
   3. Deactivate all grains
-  4. Mark silo as Dead
-  5. Close connections
+  4. Leave cluster (MembershipAgent stop)
+  5. Shutdown message center
+  6. Mark silo as Stopped
 
-- [ ] **8.5** Implement `ClusterClient`
+- [ ] **8.5** Implement `ClusterClient` (deferred - not required for MVP)
   - External client that connects to cluster
   - Discovers silos via membership table
   - Routes requests through gateway silo
@@ -612,16 +617,25 @@ orleans-codegen/
 orleans-host/
 ├── src/
 │   ├── lib.rs
+│   ├── config.rs
+│   ├── error.rs
 │   ├── silo_builder.rs
-│   ├── silo.rs
-│   ├── lifecycle.rs
-│   └── cluster_client.rs
+│   └── silo.rs
+├── tests/
+│   └── integration_test.rs
 ```
 
 ### Tests
-- Integration test: silo starts and joins cluster
-- Integration test: silo graceful shutdown
-- Integration test: client connects and calls grain
+- Unit tests: silo creation, start/stop lifecycle, component initialization (6 tests)
+- Integration test: three silos form cluster ✅
+- Integration test: grain activation on silo ✅
+- Integration test: single activation guarantee ✅
+- Integration test: grain directory assignment consistency ✅
+- Integration test: message center initialization ✅
+- Integration test: dispatcher registration ✅
+- Integration test: silo graceful shutdown with grain deactivation ✅
+- Integration test: distributed grain placement across 3 silos ✅
+- Integration test: unique silo addresses with generation numbers ✅
 
 ---
 
