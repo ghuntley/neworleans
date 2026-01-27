@@ -10,9 +10,10 @@ Three separate Rust processes functioning as a single Orleans cluster where:
 ## Non-Goals for MVP
 
 - ~~Persistence (grains are in-memory only)~~ → **Now implemented in Phase 11**
+- ~~Timers~~ → **Now implemented in Phase 12** (Reminders still pending)
 - Transactions
 - Streaming
-- Timers and Reminders
+- Reminders (persistent scheduled callbacks)
 - Observers/Callbacks
 - Complex placement strategies (MVP uses hash-based only)
 - Version tolerance in serialization
@@ -959,6 +960,109 @@ bridge.clear_state().await?;
 
 ---
 
+## Phase 12: Grain Timers ✅
+
+**Objective**: Implement in-memory, grain-scoped scheduled callbacks for periodic and delayed execution.
+
+**Status**: COMPLETE - 33 unit tests passing.
+
+### Tasks
+
+- [x] **12.1** Define error types for timer operations
+  - `TimerError` enum with variants: AlreadyDisposed, NotFound, PeriodTooShort, ChannelClosed, Internal
+  - `TimerResult<T>` type alias
+
+- [x] **12.2** Implement `TimerId` unique identifier
+  - Simple u64-based identifier
+  - Display trait for logging
+  - Hash/Eq traits for collection storage
+
+- [x] **12.3** Implement `TimerHandle` internal management
+  - Cancellation via `CancellationToken`
+  - Schedule change via channel
+  - `is_cancelled()`, `cancel()`, `change()` methods
+
+- [x] **12.4** Implement `GrainTimer` public API
+  - `id()`, `is_disposed()`, `dispose()`, `change()` methods
+  - Clone support for sharing timer references
+  - Dispose is idempotent (safe to call multiple times)
+
+- [x] **12.5** Implement `GrainTimerRegistry`
+  - Manages all timers for a grain activation
+  - `register_timer(callback, due_time, period)` -> GrainTimer
+  - `dispose_all()` for grain deactivation cleanup
+  - `active_timer_count()` for monitoring
+  - Timer tasks use tokio::spawn for async execution
+
+- [x] **12.6** Implement `TimerOptions` configuration
+  - `min_timer_period` (default: 10ms)
+  - `max_timer_callbacks_per_turn` (default: 100)
+  - `allow_immediate_timers` (default: true)
+  - Builder pattern for configuration
+
+- [x] **12.7** Implement `ITimerRegistry` trait
+  - Interface for timer registration services
+  - Enables dependency injection and testing
+
+### Timer Characteristics
+- In-memory only (lost on deactivation)
+- Grain-scoped (tied to specific activation)
+- No persistence across silo restarts
+- High frequency capable (milliseconds)
+- Stopped automatically on grain deactivation
+- Callbacks queued on grain's work queue for turn-based execution
+
+### Crate Structure
+```
+orleans-timers/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs        # TimerError, TimerResult
+│   ├── options.rs      # TimerOptions configuration
+│   ├── timer.rs        # TimerId, TimerHandle, GrainTimer
+│   └── registry.rs     # GrainTimerRegistry, ITimerRegistry
+```
+
+### Tests
+- Unit tests: error types (5 tests)
+- Unit tests: timer options (6 tests)
+- Unit tests: timer ID and handle (9 tests)
+- Unit tests: grain timer operations (4 tests)
+- Unit tests: registry operations (8 tests)
+- Async tests: timer firing and scheduling (multiple tests)
+
+### Usage Example
+```rust
+use orleans_timers::{GrainTimerRegistry, TimerCallback};
+use std::time::Duration;
+
+// Create a timer registry (typically owned by grain context)
+let (callback_tx, mut callback_rx) = tokio::sync::mpsc::unbounded_channel();
+let registry = GrainTimerRegistry::new(callback_tx);
+
+// Register a periodic timer
+let callback: TimerCallback = Box::new(|| Box::pin(async {
+    println!("Timer fired!");
+}));
+let timer = registry.register_timer(
+    callback,
+    Duration::from_secs(5),   // due time (first tick after 5s)
+    Duration::from_secs(10),  // period (every 10s thereafter)
+)?;
+
+// Later, change the timer's schedule
+timer.change(Duration::from_secs(1), Duration::from_secs(5))?;
+
+// Or dispose the timer
+timer.dispose();
+
+// On grain deactivation, dispose all timers
+registry.dispose_all();
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -973,6 +1077,7 @@ orleans-rs/
 ├── orleans-runtime/        # Grain hosting
 ├── orleans-telemetry/      # Structured logging
 ├── orleans-persistence/    # Grain state persistence
+├── orleans-timers/         # Grain timers
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
 ```
@@ -1019,7 +1124,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 350+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 18 host)
+7. ✅ **All tests pass** - 380+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 18 host)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -1049,6 +1154,8 @@ Phase 9 (Tests)        ←── Phase 8
 Phase 10 (Telemetry)   ←── All above phases (observability layer)
 
 Phase 11 (Persistence) ←── Phase 1 (Identity) + serde
+
+Phase 12 (Timers)      ←── tokio (standalone, integrates with Runtime)
 ```
 
 Estimated complexity: ~8,000-12,000 lines of Rust code for MVP.
