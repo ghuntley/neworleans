@@ -755,19 +755,26 @@ orleans-host/
     - `test_interleaved_read_write_operations` - 50 interleaved read/write pairs, no race conditions
     - `test_counter_invariants_property` - Property-based test for counter invariants (10, 25, 50, 75 calls)
 
-### Property-Based Tests (Future work)
+### Property-Based Tests ✅
 
-- [ ] **9.10** Grain identity properties
+- [x] **9.10** Grain identity properties
   - `grain_id(grain_ref) == expected_grain_id`
   - `hash(grain_id1) != hash(grain_id2)` for different grains (usually)
+  - **Implemented in**: `property_tests.rs` (orleans-host/tests/)
+  - **Tests**: 8 property tests covering equality, hash consistency, parse/display roundtrip, integer key roundtrip, compound key split, hash distribution, hash stability
 
-- [ ] **9.11** Directory consistency
+- [x] **9.11** Directory consistency
   - After any sequence of register/unregister operations
   - `lookup(grain_id)` returns registered address or None
+  - **Implemented in**: `property_tests.rs` (orleans-host/tests/)
+  - **Tests**: 7 property tests covering register/lookup, unregister/lookup, duplicate registration, conflict detection, grain count consistency, dead silo entry removal, concurrent operations
 
-- [ ] **9.12** Message delivery
+- [x] **9.12** Message delivery
   - All sent messages are received (unless silo dies)
   - No duplicate deliveries
+  - **Implemented in**: `property_tests.rs` (orleans-host/tests/)
+  - **Tests**: 4 async tests covering local delivery, sequential delivery, data integrity, and no duplicate delivery
+  - **Additional tests**: Hash distribution uniformity, hash collision rate verification
 
 ### Crate Structure
 ```
@@ -1688,7 +1695,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 669+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 18 host)
+7. ✅ **All tests pass** - 691+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 40 host including 22 property tests)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -1704,6 +1711,12 @@ The MVP is complete! All core criteria have been achieved:
 
 12. ✅ **Streaming** - Reactive pub/sub messaging for event processing
     - Verified by: `orleans-streaming` crate with 51 unit tests and 1 doc test
+
+13. ✅ **Property-based tests** - Comprehensive invariant verification for distributed system correctness
+    - Verified by: 22 property tests in `property_tests.rs` covering:
+      - Grain identity properties (equality, hashing, parse/display roundtrip)
+      - Directory consistency (register/lookup/unregister invariants)
+      - Message delivery guarantees (no loss, no duplicates, data integrity)
 
 ---
 
