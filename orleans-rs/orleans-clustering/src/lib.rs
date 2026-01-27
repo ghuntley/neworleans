@@ -67,6 +67,7 @@ mod membership_table;
 mod options;
 mod silo_status;
 mod table_version;
+mod tcp_membership_table;
 
 // Re-export public API
 pub use error::{MembershipError, MembershipResult};
@@ -79,6 +80,7 @@ pub use membership_table::{IMembershipTable, MembershipTableData};
 pub use options::ClusterMembershipOptions;
 pub use silo_status::SiloStatus;
 pub use table_version::TableVersion;
+pub use tcp_membership_table::{MembershipTableServer, TcpMembershipTable};
 
 #[cfg(test)]
 mod tests {
