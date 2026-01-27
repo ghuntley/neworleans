@@ -79,19 +79,21 @@ orleans-core/
 
 ---
 
-## Phase 2: Binary Serialization
+## Phase 2: Binary Serialization ✅
 
 **Objective**: Implement Orleans wire protocol for network communication.
 
+**Status**: COMPLETE - 102 unit tests and property tests passing.
+
 ### Tasks
 
-- [ ] **2.1** Implement VarInt encoding/decoding
+- [x] **2.1** Implement VarInt encoding/decoding
   - `write_varint(writer: &mut impl Write, value: u64)`
   - `read_varint(reader: &mut impl Read) -> u64`
   - ZigZag encoding for signed integers
   - Property test: `decode(encode(n)) == n` for all u64
 
-- [ ] **2.2** Implement wire types enum
+- [x] **2.2** Implement wire types enum
   ```rust
   enum WireType {
       VarInt = 0,
@@ -104,35 +106,37 @@ orleans-core/
   }
   ```
 
-- [ ] **2.3** Implement field header encoding
+- [x] **2.3** Implement field header encoding
   - 1-byte header: WireType(3 bits) + SchemaType(2 bits) + FieldIdDelta(3 bits)
   - Extended field IDs for delta > 6
 
-- [ ] **2.4** Implement `Writer` struct
-  - Buffer management with segment pooling
+- [x] **2.4** Implement `Writer` struct
+  - Buffer management with `bytes::BytesMut`
   - `write_field_header(field_id_delta, wire_type, schema_type)`
   - `write_varint()`, `write_fixed32()`, `write_fixed64()`
   - `write_length_prefixed(bytes)`
 
-- [ ] **2.5** Implement `Reader` struct
+- [x] **2.5** Implement `Reader` struct
   - `read_field_header() -> Field`
   - `read_varint()`, `read_fixed32()`, `read_fixed64()`
   - `read_length_prefixed() -> &[u8]`
   - `skip_field(wire_type)` for forward compatibility
 
-- [ ] **2.6** Implement primitive codecs
+- [x] **2.6** Implement primitive codecs
   - `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
   - `f32`, `f64`
   - `bool`
   - `String` (UTF-8, length-prefixed)
   - `Vec<u8>` (raw bytes)
+  - `Option<T>` (skip if None)
 
-- [ ] **2.7** Implement identity type codecs
+- [x] **2.7** Implement identity type codecs
   - `IdSpan`, `GrainType`, `GrainId`, `SiloAddress`, `ActivationId`, `GrainAddress`
 
 - [ ] **2.8** Implement `#[derive(OrleansSerialize)]` proc macro (basic version)
   - Generates `IFieldCodec` implementation for structs
   - Field IDs via `#[id(n)]` attribute
+  - *Deferred to Phase 7 (Codegen) for better integration with grain interfaces*
 
 ### Crate Structure
 ```

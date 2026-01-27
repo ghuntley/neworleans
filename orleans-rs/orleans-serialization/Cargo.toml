@@ -1,0 +1,15 @@
+[package]
+name = "orleans-serialization"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Orleans binary serialization protocol for Rust"
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
