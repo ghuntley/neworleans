@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::time::{interval, Duration};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::error::MembershipResult;
 use crate::membership_entry::MembershipEntry;
@@ -55,6 +55,7 @@ impl MembershipAgent {
     /// 2. Validates connectivity to existing silos
     /// 3. Transitions to Active
     /// 4. Starts the heartbeat background task
+    #[instrument(skip(self), fields(silo = %self.manager.local_silo()))]
     pub async fn start(&self) -> MembershipResult<()> {
         info!(
             silo = %self.manager.local_silo(),
@@ -219,6 +220,7 @@ impl MembershipAgent {
     }
 
     /// Gracefully stop the membership agent and leave the cluster.
+    #[instrument(skip(self), fields(silo = %self.manager.local_silo()))]
     pub async fn stop(&self) -> MembershipResult<()> {
         info!(
             silo = %self.manager.local_silo(),

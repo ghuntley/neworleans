@@ -784,6 +784,81 @@ orleans-tests/
 
 ---
 
+## Phase 10: Observability & Telemetry ✅
+
+**Objective**: Implement comprehensive structured logging via the `tracing` crate for production-ready observability.
+
+**Status**: COMPLETE - 20 unit tests passing (including 4 property-based tests).
+
+### Tasks
+
+- [x] **10.1** Create `orleans-telemetry` crate
+  - Centralized logging configuration and initialization
+  - Multiple output formats: Compact, Pretty, JSON
+  - Configurable log levels per module
+  - Re-exports of common tracing macros
+
+- [x] **10.2** Implement `LogConfig` builder
+  - `LogConfig::new()` with fluent builder pattern
+  - Preset configurations: `development()`, `production()`, `testing()`
+  - Configurable options: location, thread IDs, target, span events
+  - Custom filter directives for fine-grained control
+
+- [x] **10.3** Define Orleans-specific field names
+  - Standard field names: `silo`, `grain_id`, `activation_id`, `correlation_id`
+  - Additional fields: `method_id`, `interface_type`, `duration_ms`, `error`
+  - Target module paths for each Orleans component
+
+- [x] **10.4** Add `#[instrument]` spans to key components
+  - Silo lifecycle: `start()`, `stop()` with silo address field
+  - Catalog: `get_or_create_activation()`, `deactivate_grain()` with grain_id
+  - Dispatcher: `handle_request()`, `find_or_create_grain()` with correlation_id
+  - Membership agent: `start()`, `stop()` with silo address
+
+- [x] **10.5** Write unit and property-based tests
+  - Log level conversion tests
+  - Config builder idempotency property tests
+  - Filter directive preservation tests
+  - Field and target name validation tests
+
+### Crate Structure
+```
+orleans-telemetry/
+├── Cargo.toml
+├── src/
+│   └── lib.rs
+│       ├── LogFormat enum (Compact, Pretty, Json)
+│       ├── LogLevel enum (Trace, Debug, Info, Warn, Error)
+│       ├── LogConfig struct with builder pattern
+│       ├── init_logging() and init_logging_with_config()
+│       ├── fields module (Orleans-specific field names)
+│       └── targets module (Orleans component targets)
+```
+
+### Tests
+- Unit tests: log level/format defaults, config builder (6 tests)
+- Unit tests: field and target name validation (2 tests)
+- Property tests: config builder idempotency (1 test)
+- Property tests: filter directive preservation (1 test)
+- Property tests: log level/format consistency (2 tests)
+- Integration tests: tracing macros and spans compile (2 tests)
+- Doc tests: initialization examples (3 tests)
+
+### Usage Example
+```rust
+use orleans_telemetry::{init_logging, LogFormat, LogLevel, LogConfig};
+
+// Simple initialization
+init_logging(LogFormat::Compact, LogLevel::Info);
+
+// Advanced configuration
+let config = LogConfig::development()
+    .with_filter("orleans_host=debug,orleans_runtime=trace");
+init_logging_with_config(config);
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -796,6 +871,7 @@ orleans-rs/
 ├── orleans-clustering/     # Membership
 ├── orleans-directory/      # Grain directory
 ├── orleans-runtime/        # Grain hosting
+├── orleans-telemetry/      # Structured logging
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
 ```
@@ -815,6 +891,7 @@ thiserror = "1"
 parking_lot = "0.12"
 xxhash-rust = { version = "0.8", features = ["xxh32"] }
 proptest = "1"  # For property testing
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 ```
 
 ---
@@ -841,7 +918,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 275+ tests across all crates (120 core, 80 clustering, 54 directory, 18 host)
+7. ✅ **All tests pass** - 295+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 18 host)
 
 ---
 
@@ -864,6 +941,8 @@ Phase 7 (Codegen)      ←──────────────────
 Phase 8 (Host)         ←── All above phases
 
 Phase 9 (Tests)        ←── Phase 8
+
+Phase 10 (Telemetry)   ←── All above phases (observability layer)
 ```
 
 Estimated complexity: ~8,000-12,000 lines of Rust code for MVP.

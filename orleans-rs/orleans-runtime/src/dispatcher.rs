@@ -13,7 +13,7 @@ use orleans_messaging::{Direction, Message, MessageCenter, RejectionType};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 use crate::activation_data::PendingMessage;
 use crate::catalog::Catalog;
@@ -99,6 +99,11 @@ impl Dispatcher {
     }
 
     /// Handle an incoming request.
+    #[instrument(skip(self, message), fields(
+        grain_id = %message.target_grain(),
+        correlation_id = ?message.id(),
+        method_id = message.method_id()
+    ))]
     async fn handle_request(&self, message: Message) {
         let grain_id = message.target_grain();
         let correlation_id = message.id();
@@ -303,6 +308,7 @@ impl Dispatcher {
     }
 
     /// Find the grain location or create a new activation.
+    #[instrument(skip(self), fields(grain_id = %grain_id, silo = %self.silo_address))]
     async fn find_or_create_grain(&self, grain_id: &GrainId) -> RuntimeResult<GrainAddress> {
         // First, look up in the directory
         match self.directory.lookup(grain_id).await {

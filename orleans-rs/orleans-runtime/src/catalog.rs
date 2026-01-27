@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::activation_data::{ActivationData, ActivationHandle, PendingMessage};
 use crate::activation_state::{ActivationState, DeactivationReason};
@@ -146,6 +146,7 @@ impl Catalog {
     ///
     /// If an activation already exists, return it.
     /// Otherwise, create a new one.
+    #[instrument(skip(self), fields(grain_id = %grain_id, silo = %self.silo_address))]
     pub fn get_or_create_activation(
         &self,
         grain_id: &GrainId,
@@ -398,6 +399,7 @@ impl Catalog {
     }
 
     /// Deactivate a grain.
+    #[instrument(skip(self), fields(grain_id = %grain_id, reason = ?reason))]
     pub async fn deactivate_grain(
         &self,
         grain_id: &GrainId,

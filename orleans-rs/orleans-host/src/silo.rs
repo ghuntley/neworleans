@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use tokio::sync::watch;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use orleans_clustering::{
     IMembershipTable, MembershipAgent, MembershipTableManager,
@@ -465,6 +465,7 @@ impl Silo {
     /// 3. Sets up the grain directory
     /// 4. Creates the catalog and registers grain types
     /// 5. Creates and registers the dispatcher
+    #[instrument(skip(self), fields(silo = %self.silo_address))]
     pub async fn start(&mut self) -> SiloResult<()> {
         // Check state
         {
@@ -639,6 +640,7 @@ impl Silo {
     }
 
     /// Stop the silo gracefully.
+    #[instrument(skip(self), fields(silo = %self.silo_address))]
     pub async fn stop(&mut self) -> SiloResult<()> {
         // Check state
         {

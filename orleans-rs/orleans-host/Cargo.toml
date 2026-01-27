@@ -28,12 +28,13 @@ bytes = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+orleans-telemetry = { path = "../orleans-telemetry" }
 
 [dev-dependencies]
 proptest = { workspace = true }
