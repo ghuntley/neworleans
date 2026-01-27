@@ -1234,6 +1234,132 @@ async fn example() {
 
 ---
 
+## Phase 14: Call Filters and Interceptors ✅
+
+**Objective**: Implement middleware pipeline for intercepting grain method calls, enabling cross-cutting concerns like logging, tracing, authentication, and error handling.
+
+**Status**: COMPLETE - 87 unit tests passing.
+
+### Tasks
+
+- [x] **14.1** Define error types for filter operations
+  - `FilterError` enum with variants: BrokenFilterChain, NoResponseSet, Configuration, Invocation, Internal, ContextKeyNotFound, ContextTypeMismatch, AccessDenied, Timeout
+  - `FilterResult<T>` type alias
+
+- [x] **14.2** Implement `Response` types
+  - `Response` enum: Completed, Result, Exception
+  - `ResponseResult` for typed results with optional serialization
+  - `ResponseException` with message, type, and stack trace
+  - Factory methods: `completed()`, `from_result()`, `from_exception()`
+
+- [x] **14.3** Implement `ContextProperties` for request context
+  - Type-erased storage using `ContextValueBox`
+  - `get<T>()`, `set<T>()`, `remove()`, `clear()` methods
+  - Clone support with proper value cloning
+  - Merge support for context propagation
+
+- [x] **14.4** Implement `RequestContext` task-local storage
+  - Static accessor using tokio task_local
+  - `scope()` for running futures with context
+  - `with_inherited_context()` for copy-on-write inheritance
+  - `snapshot()` for context propagation to outgoing calls
+  - Well-known keys: trace_id, span_id, correlation_id, user_id, tenant_id
+
+- [x] **14.5** Implement call context types
+  - `GrainCallContext` base with target, interface, method info
+  - `IncomingGrainCallContext` for server-side (includes grain_type)
+  - `OutgoingGrainCallContext` for client-side
+  - Extension storage for filter-specific data
+  - Invoke callback mechanism for pipeline continuation
+
+- [x] **14.6** Define filter traits
+  - `IIncomingGrainCallFilter` for server-side interception
+  - `IOutgoingGrainCallFilter` for client-side interception
+  - `name()` and `order()` methods for diagnostics and sorting
+  - `DelegateIncomingFilter`/`DelegateOutgoingFilter` for closures
+
+- [x] **14.7** Implement filter pipelines
+  - `IncomingFilterPipeline` and `OutgoingFilterPipeline`
+  - Sequential filter execution with chain continuation
+  - Broken chain detection (filter didn't call invoke)
+  - Response enforcement (response must be set after invocation)
+  - Filter ordering by `order()` value
+  - Configurable via `PipelineOptions`
+
+- [x] **14.8** Implement built-in filters
+  - `LoggingFilter` - logs method calls with timing
+  - `ActivityPropagationFilter` - propagates trace context
+  - `ExceptionTransformFilter` - transforms exceptions for clients
+
+### Filter Characteristics
+- Middleware pattern: each filter calls `context.invoke()` to continue
+- Filters execute in order (lower order values first)
+- Both pre-processing (before invoke) and post-processing (after invoke)
+- Request context flows through async call chains
+- Built-in filters for common cross-cutting concerns
+
+### Crate Structure
+```
+orleans-filters/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs           # FilterError, FilterResult
+│   ├── response.rs        # Response, ResponseResult, ResponseException
+│   ├── request_context.rs # ContextProperties, RequestContext
+│   ├── context.rs         # GrainCallContext, IncomingGrainCallContext, OutgoingGrainCallContext
+│   ├── filter.rs          # IIncomingGrainCallFilter, IOutgoingGrainCallFilter, delegates
+│   ├── pipeline.rs        # IncomingFilterPipeline, OutgoingFilterPipeline
+│   └── builtin.rs         # LoggingFilter, ActivityPropagationFilter, ExceptionTransformFilter
+```
+
+### Tests
+- Unit tests: error types (8 tests)
+- Unit tests: response operations (10 tests)
+- Unit tests: context properties (10 tests)
+- Unit tests: request context (12 tests)
+- Unit tests: call context (12 tests)
+- Unit tests: filter traits (6 tests)
+- Unit tests: pipeline operations (16 tests)
+- Unit tests: built-in filters (13 tests)
+
+### Usage Example
+```rust
+use orleans_filters::{
+    IncomingFilterPipeline, LoggingFilter, ActivityPropagationFilter,
+    IIncomingGrainCallFilter, RequestContext, ContextProperties,
+};
+use std::sync::Arc;
+
+// Create a filter pipeline
+let mut pipeline = IncomingFilterPipeline::new();
+
+// Add built-in filters
+pipeline.add_filter(Arc::new(LoggingFilter::new())).unwrap();
+pipeline.add_filter(Arc::new(ActivityPropagationFilter::new())).unwrap();
+
+// Sort filters by order
+pipeline.sort_by_order();
+
+// Execute the pipeline
+pipeline.execute(&mut context, |ctx| {
+    // Invoke the actual grain method
+    ctx.set_result(grain.invoke_method(ctx.method_id(), ctx.request_body()));
+    Ok(())
+}).await?;
+
+// Request context flows through calls
+let mut props = ContextProperties::new();
+props.set("user_id", "user123".to_string());
+
+RequestContext::scope(props, async {
+    // Context is available in nested async calls
+    let user = RequestContext::get::<String>("user_id");
+}).await;
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -1250,6 +1376,7 @@ orleans-rs/
 ├── orleans-persistence/    # Grain state persistence
 ├── orleans-timers/         # Grain timers
 ├── orleans-reminders/      # Grain reminders (persistent)
+├── orleans-filters/        # Call filters and interceptors
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
 ```
@@ -1296,13 +1423,16 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 440+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 18 host)
+7. ✅ **All tests pass** - 525+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 18 host)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
 
 9. ✅ **Grain reminders** - Persistent scheduled callbacks that survive silo restarts
    - Verified by: `orleans-reminders` crate with 64 unit tests and 1 doc test
+
+10. ✅ **Call filters and interceptors** - Middleware pipeline for cross-cutting concerns
+    - Verified by: `orleans-filters` crate with 87 unit tests
 
 ---
 
@@ -1333,6 +1463,8 @@ Phase 11 (Persistence) ←── Phase 1 (Identity) + serde
 Phase 12 (Timers)      ←── tokio (standalone, integrates with Runtime)
 
 Phase 13 (Reminders)   ←── Phase 1 (Identity) + Phase 5 (Directory) + tokio
+
+Phase 14 (Filters)     ←── Phase 1 (Identity) + Phase 3 (Messaging) + tokio
 ```
 
 Estimated complexity: ~8,000-12,000 lines of Rust code for MVP.

@@ -12,6 +12,7 @@ members = [
     "orleans-persistence",
     "orleans-timers",
     "orleans-reminders",
+    "orleans-filters",
     "orleans-host",
 ]
 

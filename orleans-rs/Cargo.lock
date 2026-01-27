@@ -482,6 +482,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "orleans-filters"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "orleans-core",
+ "orleans-messaging",
+ "parking_lot",
+ "proptest",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "orleans-host"
 version = "0.1.0"
 dependencies = [

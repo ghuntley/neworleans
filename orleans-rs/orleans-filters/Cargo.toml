@@ -1,0 +1,22 @@
+[package]
+name = "orleans-filters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Call filters and interceptors for Orleans grain method calls"
+
+[dependencies]
+async-trait.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+bytes.workspace = true
+parking_lot.workspace = true
+
+orleans-core = { path = "../orleans-core" }
+orleans-messaging = { path = "../orleans-messaging" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+proptest.workspace = true
