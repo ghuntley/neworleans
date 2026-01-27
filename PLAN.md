@@ -1871,6 +1871,116 @@ client.disconnect().await?;
 
 ---
 
+## Phase 19: Interface Versioning ✅
+
+**Objective**: Implement interface versioning system for heterogeneous cluster deployments with rolling upgrades.
+
+**Status**: COMPLETE - 97 unit tests and 9 doc tests passing.
+
+### Tasks
+
+- [x] **19.1** Define error types for versioning operations
+  - `VersionError` enum with variants: NoCompatibleVersion, InterfaceNotFound, GrainTypeNotFound, NoSilosForVersion, StaleManifest, InvalidVersion, UnknownStrategy, Configuration, Internal
+  - `VersionResult<T>` type alias
+
+- [x] **19.2** Implement `GrainVersioningOptions` configuration
+  - `default_compatibility_strategy` (default: "BackwardCompatible")
+  - `default_version_selector_strategy` (default: "AllCompatibleVersions")
+  - `enabled` flag for version-aware placement
+  - Preset configurations: `strict()`, `permissive()`, `conservative()`, `aggressive()`
+
+- [x] **19.3** Implement compatibility strategies
+  - `CompatibilityDirector` trait with `is_compatible(requested, current)` method
+  - `BackwardCompatible` - newer versions handle older requests (default)
+  - `StrictVersionCompatible` - only exact version matches
+  - `AllVersionsCompatible` - all versions work together
+  - Factory function `create_compatibility_director(name)`
+
+- [x] **19.4** Implement version selectors
+  - `VersionSelector` trait with `get_suitable_versions()` method
+  - `MinimumVersionSelector` - select lowest compatible version
+  - `LatestVersionSelector` - select highest compatible version
+  - `AllCompatibleVersionsSelector` - return all compatible versions (default)
+  - Factory function `create_version_selector(name)`
+
+- [x] **19.5** Implement `GrainVersionManifest`
+  - Thread-safe tracking of versions across the cluster
+  - `register_version(interface, version, silo)` and `unregister_version()`
+  - `get_available_versions(interface)` and `get_supported_silos(interface, version)`
+  - `unregister_silo(silo)` for membership changes
+  - Atomic manifest version for cache invalidation
+
+- [x] **19.6** Implement manager components
+  - `CompatibilityDirectorManager` - per-interface compatibility strategy configuration
+  - `VersionSelectorManager` - per-interface version selector configuration
+  - `CachedVersionSelectorManager` - caching layer with automatic invalidation
+
+- [x] **19.7** Implement `PlacementTarget`
+  - `grain_id`, `interface_type`, `interface_version` fields
+  - `is_version_aware()` method (version > 0)
+  - Request context data support for placement decisions
+
+### Crate Structure
+```
+orleans-versioning/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs            # VersionError, VersionResult
+│   ├── options.rs          # GrainVersioningOptions
+│   ├── compatibility.rs    # CompatibilityDirector, strategies
+│   ├── selector.rs         # VersionSelector, strategies
+│   ├── manifest.rs         # GrainVersionManifest
+│   ├── manager.rs          # Manager components with caching
+│   └── placement_target.rs # PlacementTarget
+```
+
+### Tests
+- Unit tests: error types (9 tests)
+- Unit tests: options configuration (7 tests)
+- Unit tests: compatibility strategies (12 tests)
+- Unit tests: version selectors (14 tests)
+- Unit tests: grain version manifest (15 tests)
+- Unit tests: manager components (18 tests)
+- Unit tests: placement target (14 tests)
+- Property tests: compatibility transitivity, selector correctness (8 tests)
+- Doc tests: public API examples (9 tests)
+
+### Usage Example
+```rust
+use orleans_versioning::{
+    GrainVersionManifest, CachedVersionSelectorManager,
+    CompatibilityDirectorManager, VersionSelectorManager,
+    GrainVersioningOptions, PlacementTarget,
+    BackwardCompatible, LatestVersionSelector,
+};
+use std::sync::Arc;
+
+// Configure versioning
+let options = GrainVersioningOptions::aggressive();
+
+// Set up managers
+let manifest = Arc::new(GrainVersionManifest::new());
+let compat_mgr = Arc::new(CompatibilityDirectorManager::new());
+let selector_mgr = Arc::new(VersionSelectorManager::new());
+
+// Configure latest version selection for an interface
+selector_mgr.set_strategy(interface_type.clone(), "LatestVersion")?;
+
+// Register silo versions
+manifest.register_version(&interface_type, 1, silo_a.clone());
+manifest.register_version(&interface_type, 2, silo_b.clone());
+
+// Create cached selector for placement
+let cached = CachedVersionSelectorManager::new(manifest, compat_mgr, selector_mgr);
+
+// Get suitable silos for version-aware placement
+let result = cached.get_suitable_silos(&grain_type, &interface_type, 1);
+println!("Suitable silos: {:?}", result.suitable_silos);
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -1891,6 +2001,7 @@ orleans-rs/
 ├── orleans-observers/      # Observers and callbacks
 ├── orleans-streaming/      # Reactive pub/sub streaming
 ├── orleans-transactions/   # ACID transactions with 2PC
+├── orleans-versioning/     # Interface versioning for rolling upgrades
 ├── orleans-client/         # ClusterClient for external applications
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
@@ -1938,7 +2049,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 856+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 62 client, 40 host including 22 property tests)
+7. ✅ **All tests pass** - 962+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 106 versioning, 62 client, 40 host including 30 property tests)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -1964,6 +2075,10 @@ The MVP is complete! All core criteria have been achieved:
 14. ✅ **ACID Transactions** - Two-phase commit protocol for distributed state consistency
     - Verified by: `orleans-transactions` crate with 100 unit tests
     - Features: CausalClock, ReaderWriterLock, TransactionAgent, TransactionalState
+
+15. ✅ **Interface Versioning** - Rolling upgrades with heterogeneous cluster deployments
+    - Verified by: `orleans-versioning` crate with 97 unit tests and 9 doc tests
+    - Features: CompatibilityDirector, VersionSelector, GrainVersionManifest, CachedVersionSelectorManager, PlacementTarget
 
 ---
 
@@ -2004,6 +2119,8 @@ Phase 16 (Streaming)   ←── Phase 1 (Identity) + Phase 15 (Observers) + tok
 Phase 17 (Transactions) ←── Phase 1 (Identity) + Phase 11 (Persistence) + tokio
 
 Phase 18 (ClusterClient) ←── Phase 1 (Identity) + Phase 3 (Messaging) + Phase 4 (Clustering) + Phase 6 (Runtime)
+
+Phase 19 (Versioning)   ←── Phase 1 (Identity) + Phase 5 (Directory)
 ```
 
-Estimated complexity: ~16,000-24,000 lines of Rust code.
+Estimated complexity: ~18,000-26,000 lines of Rust code.
