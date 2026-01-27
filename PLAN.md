@@ -9,7 +9,7 @@ Three separate Rust processes functioning as a single Orleans cluster where:
 
 ## Non-Goals for MVP
 
-- Persistence (grains are in-memory only)
+- ~~Persistence (grains are in-memory only)~~ → **Now implemented in Phase 11**
 - Transactions
 - Streaming
 - Timers and Reminders
@@ -859,6 +859,106 @@ init_logging_with_config(config);
 
 ---
 
+## Phase 11: Grain Persistence ✅
+
+**Objective**: Enable grains to store state durably across activations using an optimistic concurrency model with ETags.
+
+**Status**: COMPLETE - 49 unit tests and 6 doc tests passing.
+
+### Tasks
+
+- [x] **11.1** Define error types for persistence operations
+  - `StorageError` enum with variants: EtagMismatch, RecordExists, RecordNotFound, PayloadTooLarge, Serialization, StateNotInitialized, etc.
+  - `InconsistentStateError` for optimistic concurrency conflicts
+  - `StorageResult<T>` type alias
+
+- [x] **11.2** Implement `GrainState<T>` wrapper
+  - Wraps grain state with persistence metadata
+  - Tracks ETag for optimistic concurrency control
+  - Tracks `record_exists` flag for new vs. existing state
+  - Methods: `state()`, `state_mut()`, `etag()`, `mark_read()`, `mark_written()`, `mark_cleared()`
+
+- [x] **11.3** Define `IGrainStorage` trait
+  - Primary storage provider interface using raw bytes (dyn-compatible)
+  - `read_state(state_name, grain_id) -> RawGrainState`
+  - `write_state(state_name, grain_id, state) -> String` (returns new ETag)
+  - `clear_state(state_name, grain_id, expected_etag)`
+  - Works with `RawGrainState` for serialized data
+
+- [x] **11.4** Implement `MemoryGrainStorage`
+  - In-memory storage provider for testing and development
+  - Partitioned storage for reduced lock contention
+  - Full ETag-based optimistic concurrency control
+  - Wildcard ETag ("*") support for forced updates
+  - Structured logging via `tracing` crate
+
+- [x] **11.5** Implement `StateStorageBridge<T>`
+  - Adapter connecting grains to storage providers
+  - Handles serialization/deserialization via `GrainStorageSerializer`
+  - Tracks initialization state (must call `read_state` before `write_state`)
+  - Implements `IStorage` and `IStorageTyped<T>` traits
+  - Concurrent modification detection via ETag tracking
+
+- [x] **11.6** Implement `GrainStorageSerializer`
+  - JSON-based serialization for grain state
+  - Concrete type (not trait) for dyn-compatibility
+  - Methods: `serialize()`, `deserialize()`
+
+### Crate Structure
+```
+orleans-persistence/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs           # StorageError, InconsistentStateError
+│   ├── grain_state.rs     # GrainState<T> wrapper
+│   ├── storage.rs         # IGrainStorage trait, GrainStorageSerializer
+│   ├── memory_storage.rs  # MemoryGrainStorage provider
+│   └── state_bridge.rs    # StateStorageBridge<T>
+```
+
+### Tests
+- Unit tests: error types and conversions (5 tests)
+- Unit tests: grain state wrapper operations (14 tests)
+- Unit tests: memory storage operations (13 tests)
+- Unit tests: state bridge lifecycle (10 tests)
+- Unit tests: serializer roundtrip (5 tests)
+- Integration test: end-to-end persistence lifecycle (2 tests)
+- Doc tests: public API examples (6 tests)
+
+### Usage Example
+```rust
+use orleans_persistence::{
+    GrainState, MemoryGrainStorage, StateStorageBridge, IStorage, IStorageTyped,
+};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+#[derive(Default, Clone, Serialize, Deserialize)]
+struct CounterState {
+    count: i32,
+}
+
+// Create storage provider
+let storage = Arc::new(MemoryGrainStorage::new());
+
+// Create bridge for a grain
+let mut bridge: StateStorageBridge<CounterState> =
+    StateStorageBridge::new(grain_id, "CounterState", storage);
+
+// Load state on activation
+bridge.read_state().await?;
+
+// Modify and persist
+bridge.state_mut().count += 1;
+bridge.write_state().await?;
+
+// Clear state
+bridge.clear_state().await?;
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -872,6 +972,7 @@ orleans-rs/
 ├── orleans-directory/      # Grain directory
 ├── orleans-runtime/        # Grain hosting
 ├── orleans-telemetry/      # Structured logging
+├── orleans-persistence/    # Grain state persistence
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
 ```
@@ -918,7 +1019,10 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 295+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 18 host)
+7. ✅ **All tests pass** - 350+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 18 host)
+
+8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
+   - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
 
 ---
 
@@ -943,6 +1047,8 @@ Phase 8 (Host)         ←── All above phases
 Phase 9 (Tests)        ←── Phase 8
 
 Phase 10 (Telemetry)   ←── All above phases (observability layer)
+
+Phase 11 (Persistence) ←── Phase 1 (Identity) + serde
 ```
 
 Estimated complexity: ~8,000-12,000 lines of Rust code for MVP.

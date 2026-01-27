@@ -9,6 +9,7 @@ members = [
     "orleans-runtime",
     "orleans-codegen",
     "orleans-telemetry",
+    "orleans-persistence",
     "orleans-host",
 ]
 
