@@ -506,6 +506,300 @@ async fn test_distributed_grain_placement() {
     silo3.stop().await.unwrap();
 }
 
+/// Test: Cross-silo grain invocation - the core Orleans value proposition.
+///
+/// This test demonstrates:
+/// 1. Three silos form a cluster
+/// 2. A grain is created on Silo 1
+/// 3. Silo 2 and Silo 3 can invoke methods on that grain
+/// 4. Location transparency - callers don't need to know which silo hosts the grain
+#[tokio::test]
+async fn test_cross_silo_grain_invocation() {
+    use bytes::Bytes;
+    use orleans_messaging::GrainInterfaceType;
+    use orleans_clustering::MembershipVersion;
+    use orleans_core::GrainAddress;
+
+    // Create shared membership table
+    let membership_table = Arc::new(InMemoryMembershipTable::new("cross-silo-test"));
+    membership_table.initialize_membership_table(true).await.unwrap();
+
+    let grain_type = create_counter_grain_type();
+
+    // Create three silos
+    let mut silo1 = SiloBuilder::test()
+        .listen_address("127.0.0.1:0".parse().unwrap())
+        .with_membership_table(membership_table.clone())
+        .register_grain_type(grain_type.clone())
+        .build()
+        .await
+        .unwrap();
+
+    let mut silo2 = SiloBuilder::test()
+        .listen_address("127.0.0.1:0".parse().unwrap())
+        .with_membership_table(membership_table.clone())
+        .register_grain_type(grain_type.clone())
+        .build()
+        .await
+        .unwrap();
+
+    let mut silo3 = SiloBuilder::test()
+        .listen_address("127.0.0.1:0".parse().unwrap())
+        .with_membership_table(membership_table.clone())
+        .register_grain_type(grain_type.clone())
+        .build()
+        .await
+        .unwrap();
+
+    // Start all silos
+    silo1.start().await.unwrap();
+    silo2.start().await.unwrap();
+    silo3.start().await.unwrap();
+
+    // Allow time for cluster formation
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    println!("\n=== Cross-Silo Grain Invocation Test ===");
+    println!("Silo 1: {}", silo1.address());
+    println!("Silo 2: {}", silo2.address());
+    println!("Silo 3: {}", silo3.address());
+
+    // Find a grain ID that maps to Silo 1 based on consistent hash
+    // This ensures we're testing cross-silo calls FROM other silos TO Silo 1
+    let directory1 = silo1.directory().unwrap();
+    let mut grain_id = GrainId::new(CounterGrain::grain_type(), IdSpan::from_str("cross-silo-counter"));
+    let mut suffix = 0;
+    while directory1.get_primary_silo(&grain_id).unwrap() != *silo1.address() {
+        suffix += 1;
+        grain_id = GrainId::new(
+            CounterGrain::grain_type(),
+            IdSpan::from_str(&format!("cross-silo-counter-{}", suffix)),
+        );
+    }
+
+    println!("\nGrain ID: {} (maps to Silo 1)", grain_id);
+
+    // Step 1: Create the grain on Silo 1 (the primary silo)
+    let catalog1 = silo1.catalog().unwrap();
+
+    // Create activation on Silo 1
+    let handle = catalog1.get_or_create_activation(&grain_id).unwrap();
+    println!("Grain created on Silo 1:");
+    println!("  GrainId: {}", grain_id);
+    println!("  ActivationId: {}", handle.activation_id());
+
+    // Wait for activation to become valid
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Register in directory - this will succeed because Silo 1 is the primary
+    let grain_address = GrainAddress::complete(
+        grain_id.clone(),
+        handle.activation_id().clone(),
+        silo1.address().clone(),
+    );
+    directory1.register(MembershipVersion::default(), grain_address.clone(), None).await.unwrap();
+    println!("  Registered in directory");
+
+    // Step 2: Invoke the grain method from Silo 1 (local call) to set initial state
+    // Enqueue a message directly to the local activation
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let increment_message = orleans_messaging::Message::new_request(
+        grain_id.clone(),
+        GrainInterfaceType::create("ICounterGrain"),
+        1, // method_id for increment
+        Bytes::new(),
+        silo1.address().clone(),
+    );
+    let pending = orleans_runtime::PendingMessage::new(increment_message, Some(tx));
+    handle.enqueue_message(pending).unwrap();
+
+    let response = rx.await.unwrap();
+    let local_result = u32::from_le_bytes(response.body()[..4].try_into().unwrap());
+    println!("\nLocal call from Silo 1:");
+    println!("  increment() returned: {}", local_result);
+    assert_eq!(local_result, 1, "First increment should return 1");
+
+    // Step 3: From Silo 2, invoke the grain via the grain factory (cross-silo call)
+    let factory2 = silo2.grain_factory().expect("Grain factory should be available");
+    let grain_ref = factory2.get_grain_reference_by_id(
+        grain_id.clone(),
+        GrainInterfaceType::create("ICounterGrain"),
+    );
+
+    println!("\nCross-silo call from Silo 2:");
+    println!("  Invoking increment() on grain hosted by Silo 1...");
+
+    let result = grain_ref.invoke(1, Bytes::new(), Some(Duration::from_secs(5))).await;
+    match result {
+        Ok(response_body) => {
+            let counter_value = u32::from_le_bytes(response_body[..4].try_into().unwrap());
+            println!("  increment() returned: {}", counter_value);
+            assert_eq!(counter_value, 2, "Second increment should return 2");
+        }
+        Err(e) => {
+            println!("  Error: {:?}", e);
+            // This might fail if the grain isn't found - let's check the directory
+            let dir2 = silo2.directory().unwrap();
+            let lookup = dir2.lookup(&grain_id).await;
+            println!("  Directory lookup from Silo 2: {:?}", lookup);
+            panic!("Cross-silo call failed: {:?}", e);
+        }
+    }
+
+    // Step 4: From Silo 3, invoke the grain (another cross-silo call)
+    let factory3 = silo3.grain_factory().expect("Grain factory should be available");
+    let grain_ref3 = factory3.get_grain_reference_by_id(
+        grain_id.clone(),
+        GrainInterfaceType::create("ICounterGrain"),
+    );
+
+    println!("\nCross-silo call from Silo 3:");
+    println!("  Invoking increment() on grain hosted by Silo 1...");
+
+    let result3 = grain_ref3.invoke(1, Bytes::new(), Some(Duration::from_secs(5))).await;
+    match result3 {
+        Ok(response_body) => {
+            let counter_value = u32::from_le_bytes(response_body[..4].try_into().unwrap());
+            println!("  increment() returned: {}", counter_value);
+            assert_eq!(counter_value, 3, "Third increment should return 3");
+        }
+        Err(e) => {
+            panic!("Cross-silo call from Silo 3 failed: {:?}", e);
+        }
+    }
+
+    // Step 5: Verify the counter value using get_value method
+    println!("\nVerifying final counter value from Silo 2:");
+    let get_result = grain_ref.invoke(2, Bytes::new(), Some(Duration::from_secs(5))).await;
+    match get_result {
+        Ok(response_body) => {
+            let counter_value = u32::from_le_bytes(response_body[..4].try_into().unwrap());
+            println!("  get_value() returned: {}", counter_value);
+            assert_eq!(counter_value, 3, "Counter should be 3 after 3 increments");
+        }
+        Err(e) => {
+            panic!("get_value() call failed: {:?}", e);
+        }
+    }
+
+    println!("\n=== Cross-Silo Grain Invocation Test PASSED ===\n");
+
+    // Cleanup
+    silo1.stop().await.unwrap();
+    silo2.stop().await.unwrap();
+    silo3.stop().await.unwrap();
+}
+
+/// Test: Location transparency - grain invocation works without knowing the hosting silo.
+#[tokio::test]
+async fn test_location_transparency() {
+    use bytes::Bytes;
+    use orleans_messaging::GrainInterfaceType;
+    use orleans_clustering::MembershipVersion;
+    use orleans_core::GrainAddress;
+
+    // Create shared membership table
+    let membership_table = Arc::new(InMemoryMembershipTable::new("location-test"));
+    membership_table.initialize_membership_table(true).await.unwrap();
+
+    let grain_type = create_counter_grain_type();
+
+    // Create two silos
+    let mut silo1 = SiloBuilder::test()
+        .listen_address("127.0.0.1:0".parse().unwrap())
+        .with_membership_table(membership_table.clone())
+        .register_grain_type(grain_type.clone())
+        .build()
+        .await
+        .unwrap();
+
+    let mut silo2 = SiloBuilder::test()
+        .listen_address("127.0.0.1:0".parse().unwrap())
+        .with_membership_table(membership_table.clone())
+        .register_grain_type(grain_type.clone())
+        .build()
+        .await
+        .unwrap();
+
+    silo1.start().await.unwrap();
+    silo2.start().await.unwrap();
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    println!("\n=== Location Transparency Test ===");
+
+    // Create multiple grains, some will be hosted on silo1, some on silo2
+    let mut grains_on_silo1 = 0;
+    let mut grains_on_silo2 = 0;
+
+    for i in 0..10 {
+        let grain_id = GrainId::new(
+            CounterGrain::grain_type(),
+            IdSpan::from_str(&format!("grain-{}", i)),
+        );
+
+        // Determine which silo should host this grain based on consistent hash
+        let primary = silo1.directory().unwrap().get_primary_silo(&grain_id).unwrap();
+
+        let (catalog, directory, silo_addr) = if primary == *silo1.address() {
+            grains_on_silo1 += 1;
+            (silo1.catalog().unwrap(), silo1.directory().unwrap(), silo1.address().clone())
+        } else {
+            grains_on_silo2 += 1;
+            (silo2.catalog().unwrap(), silo2.directory().unwrap(), silo2.address().clone())
+        };
+
+        // Create activation on the primary silo
+        let handle = catalog.get_or_create_activation(&grain_id).unwrap();
+
+        // Register in directory
+        let grain_address = GrainAddress::complete(
+            grain_id.clone(),
+            handle.activation_id().clone(),
+            silo_addr,
+        );
+        directory.register(MembershipVersion::default(), grain_address, None).await.unwrap();
+    }
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    println!("Created 10 grains:");
+    println!("  On Silo 1: {}", grains_on_silo1);
+    println!("  On Silo 2: {}", grains_on_silo2);
+
+    // From Silo 1, call ALL grains (including those on Silo 2)
+    let factory1 = silo1.grain_factory().unwrap();
+    let mut successful_calls = 0;
+
+    println!("\nCalling all grains from Silo 1:");
+    for i in 0..10 {
+        let grain_ref = factory1.get_grain_reference_with_interface(
+            CounterGrain::grain_type(),
+            IdSpan::from_str(&format!("grain-{}", i)),
+            GrainInterfaceType::create("ICounterGrain"),
+        );
+
+        match grain_ref.invoke(1, Bytes::new(), Some(Duration::from_secs(5))).await {
+            Ok(response) => {
+                let value = u32::from_le_bytes(response[..4].try_into().unwrap());
+                println!("  grain-{}: increment() = {}", i, value);
+                successful_calls += 1;
+            }
+            Err(e) => {
+                println!("  grain-{}: ERROR {:?}", i, e);
+            }
+        }
+    }
+
+    println!("\nSuccessful calls: {}/10", successful_calls);
+    assert_eq!(successful_calls, 10, "All grain calls should succeed with location transparency");
+
+    println!("\n=== Location Transparency Test PASSED ===\n");
+
+    silo1.stop().await.unwrap();
+    silo2.stop().await.unwrap();
+}
+
 /// Test: Silo addresses are unique with generation numbers.
 #[tokio::test]
 async fn test_silo_address_generation() {

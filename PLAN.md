@@ -639,21 +639,26 @@ orleans-host/
 
 ---
 
-## Phase 9: Integration Tests
+## Phase 9: Integration Tests ✅ (Partial)
 
 **Objective**: Verify the complete system with three-silo cluster.
 
+**Status**: Core cross-silo grain invocation implemented and tested (9.1, 9.2).
+
 ### Test Scenarios
 
-- [ ] **9.1** Basic grain invocation
+- [x] **9.1** Basic grain invocation ✅
   - Start 3 silos
   - Create grain on silo1
   - Call grain from silo2, verify response
   - Call grain from silo3, verify response
+  - **Implemented in**: `test_cross_silo_grain_invocation` (orleans-host/tests/integration_test.rs)
 
-- [ ] **9.2** Grain location transparency
+- [x] **9.2** Grain location transparency ✅
   - Call grain without knowing which silo hosts it
   - Verify request is routed correctly
+  - **Implemented in**: `test_location_transparency` (orleans-host/tests/integration_test.rs)
+  - Uses `DirectoryAwareMessageSender` for automatic grain location lookup
 
 - [ ] **9.3** Single activation guarantee
   - Simultaneously request same grain from all silos

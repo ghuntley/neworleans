@@ -120,7 +120,7 @@ pub use orleans_core::{GrainId, GrainType, IdSpan, SiloAddress};
 pub use orleans_messaging::{GrainInterfaceType, Message};
 pub use orleans_runtime::{
     GrainFactory, GrainReference, GrainTypeData, IGrain, IGrainActivator,
-    IGrainMethodInvoker, IGrainContext, RuntimeResult,
+    IGrainMethodInvoker, IGrainContext, PendingMessage, RuntimeResult,
 };
 
 #[cfg(test)]

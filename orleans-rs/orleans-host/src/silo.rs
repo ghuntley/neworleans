@@ -74,6 +74,152 @@ impl MessageSender for MessageCenterSender {
     }
 }
 
+/// Directory-aware message sender that looks up grain locations before sending.
+///
+/// This sender consults the grain directory to find the target silo for a grain,
+/// enabling cross-silo grain invocation with location transparency.
+struct DirectoryAwareMessageSender {
+    center: Arc<MessageCenter>,
+    directory: Arc<DistributedGrainDirectory>,
+    local_silo: SiloAddress,
+}
+
+impl MessageSender for DirectoryAwareMessageSender {
+    fn send_request(
+        &self,
+        message: Message,
+        timeout: Option<Duration>,
+    ) -> Pin<Box<dyn std::future::Future<Output = RuntimeResult<Message>> + Send + '_>> {
+        let center = self.center.clone();
+        let directory = self.directory.clone();
+        let local_silo = self.local_silo.clone();
+
+        Box::pin(async move {
+            // Update message with timeout
+            let message = if let Some(t) = timeout {
+                message.with_timeout(Some(t))
+            } else {
+                message
+            };
+
+            let grain_id = message.target_grain();
+
+            // Determine target silo:
+            // 1. If message already has a target_silo, use it
+            // 2. Otherwise, look up in directory
+            // 3. If not in directory, get the primary silo from consistent hash
+            let target_silo = if let Some(silo) = message.target_silo() {
+                silo.clone()
+            } else {
+                // Try to look up in directory first
+                match directory.lookup(grain_id).await {
+                    Ok(Some(address)) => {
+                        if let Some(silo) = address.silo_address() {
+                            debug!(
+                                grain_id = %grain_id,
+                                silo = %silo,
+                                "Found grain in directory"
+                            );
+                            silo.clone()
+                        } else {
+                            // Address doesn't have silo, use primary
+                            directory.get_primary_silo(grain_id)
+                                .map_err(|e| orleans_runtime::RuntimeError::Internal(
+                                    format!("Failed to get primary silo: {}", e)
+                                ))?
+                        }
+                    }
+                    Ok(None) => {
+                        // Not in directory, get primary silo to handle activation
+                        let primary = directory.get_primary_silo(grain_id)
+                            .map_err(|e| orleans_runtime::RuntimeError::Internal(
+                                format!("Failed to get primary silo: {}", e)
+                            ))?;
+                        debug!(
+                            grain_id = %grain_id,
+                            primary = %primary,
+                            "Grain not in directory, routing to primary silo"
+                        );
+                        primary
+                    }
+                    Err(e) => {
+                        warn!(
+                            grain_id = %grain_id,
+                            error = %e,
+                            "Directory lookup failed, using primary silo"
+                        );
+                        directory.get_primary_silo(grain_id)
+                            .map_err(|e| orleans_runtime::RuntimeError::Internal(
+                                format!("Failed to get primary silo: {}", e)
+                            ))?
+                    }
+                }
+            };
+
+            debug!(
+                grain_id = %grain_id,
+                target_silo = %target_silo,
+                local_silo = %local_silo,
+                "Sending request"
+            );
+
+            // Use the request method which properly tracks correlation
+            center.request(
+                message.target_grain().clone(),
+                target_silo,
+                message.interface_type().clone(),
+                message.method_id(),
+                message.body().clone(),
+            ).await.map_err(|e| orleans_runtime::RuntimeError::Internal(e.to_string()))
+        })
+    }
+
+    fn send_one_way(&self, message: Message) -> RuntimeResult<()> {
+        let center = self.center.clone();
+        let directory = self.directory.clone();
+
+        tokio::spawn(async move {
+            let grain_id = message.target_grain();
+
+            // Determine target silo
+            let target_silo = if let Some(silo) = message.target_silo() {
+                silo.clone()
+            } else {
+                match directory.lookup(grain_id).await {
+                    Ok(Some(address)) => {
+                        if let Some(silo) = address.silo_address() {
+                            silo.clone()
+                        } else {
+                            match directory.get_primary_silo(grain_id) {
+                                Ok(silo) => silo,
+                                Err(e) => {
+                                    warn!(error = %e, "Failed to get primary silo for one-way");
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        match directory.get_primary_silo(grain_id) {
+                            Ok(silo) => silo,
+                            Err(e) => {
+                                warn!(error = %e, "Failed to get primary silo for one-way");
+                                return;
+                            }
+                        }
+                    }
+                }
+            };
+
+            let message = message.with_target_silo(Some(target_silo));
+            if let Err(e) = center.send(message).await {
+                warn!(error = %e, "Failed to send one-way message");
+            }
+        });
+        Ok(())
+    }
+}
+
 /// The lifecycle state of a silo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SiloState {
@@ -468,10 +614,18 @@ impl Silo {
     }
 
     /// Get a reference to the grain factory for creating grain references.
+    ///
+    /// The grain factory uses a directory-aware message sender that automatically
+    /// looks up grain locations before sending, enabling cross-silo grain invocation
+    /// with location transparency.
     pub fn grain_factory(&self) -> Option<Arc<GrainFactory>> {
-        if self.catalog.is_some() {
-            let message_sender: Arc<dyn MessageSender> = Arc::new(MessageCenterSender {
+        // Need both catalog and directory to be initialized
+        if self.catalog.is_some() && self.directory.is_some() {
+            let directory = self.directory.as_ref().unwrap().clone();
+            let message_sender: Arc<dyn MessageSender> = Arc::new(DirectoryAwareMessageSender {
                 center: self.message_center.clone(),
+                directory,
+                local_silo: self.silo_address.clone(),
             });
             let interface_resolver = Arc::new(ConventionInterfaceResolver);
             Some(Arc::new(GrainFactory::new(message_sender, interface_resolver)))
