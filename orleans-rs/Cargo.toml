@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "orleans-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/dotnet/orleans"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+bytes = "1"
+dashmap = "5"
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+thiserror = "1"
+parking_lot = "0.12"
+xxhash-rust = { version = "0.8", features = ["xxh32"] }
+proptest = "1"
+serde = { version = "1", features = ["derive"] }

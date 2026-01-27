@@ -1,0 +1,16 @@
+[package]
+name = "orleans-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core identity types for Orleans Rust port"
+
+[dependencies]
+thiserror = { workspace = true }
+xxhash-rust = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
