@@ -13,6 +13,7 @@ members = [
     "orleans-timers",
     "orleans-reminders",
     "orleans-filters",
+    "orleans-observers",
     "orleans-host",
 ]
 

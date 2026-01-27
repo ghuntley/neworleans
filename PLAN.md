@@ -12,9 +12,9 @@ Three separate Rust processes functioning as a single Orleans cluster where:
 - ~~Persistence (grains are in-memory only)~~ → **Now implemented in Phase 11**
 - ~~Timers~~ → **Now implemented in Phase 12**
 - ~~Reminders~~ → **Now implemented in Phase 13**
+- ~~Observers/Callbacks~~ → **Now implemented in Phase 15**
 - Transactions
 - Streaming
-- Observers/Callbacks
 - Complex placement strategies (MVP uses hash-based only)
 - Version tolerance in serialization
 - TLS/Security
@@ -1360,6 +1360,138 @@ RequestContext::scope(props, async {
 
 ---
 
+## Phase 15: Observers and Callbacks ✅
+
+**Objective**: Implement publish-subscribe communication where grains can send notifications to clients or other grains without polling.
+
+**Status**: COMPLETE - 91 unit tests and 2 doc tests passing.
+
+### Tasks
+
+- [x] **15.1** Define error types for observer operations
+  - `ObserverError` enum with variants: ObserverGarbageCollected, NotRegistered, AlreadyRegistered, InvalidReference, NotObserverGrainId, SubscriptionExpired, NotificationFailed, ShuttingDown, ChannelError, Internal
+  - `ObserverResult<T>` type alias
+
+- [x] **15.2** Implement `ObserverGrainId`
+  - Special grain ID format: `sys.observer/[ClientId]+[ObserverScopedId]`
+  - `create(client_id)` generates new observer ID with random UUID
+  - `is_observer_grain_id(grain_id)` validates format
+  - `try_parse(grain_id)` attempts conversion from regular GrainId
+  - `client_id()`, `scoped_id()` accessors
+
+- [x] **15.3** Define `IGrainObserver` trait
+  - Marker trait for observer interfaces
+  - `as_any()` and `as_any_mut()` for downcasting
+  - All observers implement `Send + Sync + Debug + Any`
+
+- [x] **15.4** Implement `InvokeMethodOptions`
+  - Options flags: `one_way`, `read_only`, `always_interleave`, `unordered`
+  - Factory methods: `one_way()`, `read_only()`, `always_interleave()`
+
+- [x] **15.5** Implement `ObserverManager<K, V>`
+  - Thread-safe subscription management with copy-on-write semantics
+  - `subscribe(key, observer)` adds or renews subscription
+  - `unsubscribe(key)` removes subscription
+  - `notify(callback)` and `notify_filtered(callback, predicate)` for sync notification
+  - `notify_async(callback)` and `notify_async_filtered(callback, predicate)` for async notification
+  - Automatic expiration-based cleanup via configurable `Duration`
+  - `clear_expired()` removes stale subscriptions
+  - Copy-on-write snapshots for safe concurrent iteration and modification
+
+- [x] **15.6** Implement `LocalObjectData`
+  - Weak reference storage for registered observers (allows GC)
+  - Message queue for sequential delivery
+  - `receive_message(message)` queues messages
+  - `try_dequeue_message()` for message pump
+  - `is_alive()` checks if observer was garbage collected
+  - `mark_deregistered()` for cleanup
+
+- [x] **15.7** Implement `InvokableObjectManager`
+  - Registry of locally registered observers
+  - `register(observer)` creates new observer ID and registers
+  - `try_register(observer, id)` registers with specific ID
+  - `deregister(observer_id)` removes registration
+  - `dispatch(grain_id, method_id, body)` routes messages to observers
+  - `cleanup_garbage_collected()` removes defunct observers
+  - Thread-safe with DashMap
+
+### Observer Characteristics
+- Weak references allow automatic garbage collection
+- One-way (fire-and-forget) notification semantics
+- Subscription expiration with configurable timeout
+- Copy-on-write for safe concurrent notification
+- Message queuing for sequential delivery
+
+### Crate Structure
+```
+orleans-observers/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs                # ObserverError, ObserverResult
+│   ├── observer_grain_id.rs    # ObserverGrainId
+│   ├── traits.rs               # IGrainObserver, IAddressable, IInvokable
+│   ├── observer_manager.rs     # ObserverManager<K, V>
+│   ├── local_object_data.rs    # LocalObjectData, ObserverMessage
+│   └── invokable_object_manager.rs  # InvokableObjectManager
+```
+
+### Tests
+- Unit tests: error types (10 tests)
+- Unit tests: observer grain ID (18 tests + 3 property tests)
+- Unit tests: traits (5 tests)
+- Unit tests: observer manager (18 tests + 3 property tests)
+- Unit tests: local object data (12 tests)
+- Unit tests: invokable object manager (15 tests)
+- Integration tests: full observer flow (7 tests)
+
+### Usage Example
+```rust
+use orleans_observers::{
+    ObserverManager, InvokableObjectManager, IGrainObserver, ObserverGrainId,
+};
+use std::sync::Arc;
+use std::time::Duration;
+
+// Observable grain with subscription management
+struct ChatRoomGrain {
+    observers: ObserverManager<String, Arc<dyn IGrainObserver>>,
+}
+
+impl ChatRoomGrain {
+    fn new() -> Self {
+        Self {
+            observers: ObserverManager::new(Duration::from_secs(300)),
+        }
+    }
+
+    fn subscribe(&self, user_id: String, observer: Arc<dyn IGrainObserver>) {
+        self.observers.subscribe(user_id, observer);
+    }
+
+    fn broadcast_message(&self, message: &str) {
+        self.observers.notify(|_observer| {
+            // Send notification to each observer
+            println!("Broadcasting: {}", message);
+        });
+    }
+}
+
+// Client-side observer registration
+let manager = InvokableObjectManager::new("client-1".to_string());
+let observer: Arc<dyn IGrainObserver> = Arc::new(MyObserver::new());
+let _keep_alive = observer.clone(); // Must keep strong reference!
+let observer_id = manager.register(observer).unwrap();
+
+// Pass observer_id to grain for subscription
+// grain.subscribe(user_id, observer_ref).await;
+
+// Later, deregister
+manager.deregister(&observer_id).unwrap();
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -1377,6 +1509,7 @@ orleans-rs/
 ├── orleans-timers/         # Grain timers
 ├── orleans-reminders/      # Grain reminders (persistent)
 ├── orleans-filters/        # Call filters and interceptors
+├── orleans-observers/      # Observers and callbacks
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
 ```
@@ -1423,7 +1556,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 525+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 18 host)
+7. ✅ **All tests pass** - 618+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 18 host)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -1433,6 +1566,9 @@ The MVP is complete! All core criteria have been achieved:
 
 10. ✅ **Call filters and interceptors** - Middleware pipeline for cross-cutting concerns
     - Verified by: `orleans-filters` crate with 87 unit tests
+
+11. ✅ **Observers and callbacks** - Pub/sub communication for grains
+    - Verified by: `orleans-observers` crate with 91 unit tests and 2 doc tests
 
 ---
 
@@ -1465,6 +1601,8 @@ Phase 12 (Timers)      ←── tokio (standalone, integrates with Runtime)
 Phase 13 (Reminders)   ←── Phase 1 (Identity) + Phase 5 (Directory) + tokio
 
 Phase 14 (Filters)     ←── Phase 1 (Identity) + Phase 3 (Messaging) + tokio
+
+Phase 15 (Observers)   ←── Phase 1 (Identity) + tokio
 ```
 
-Estimated complexity: ~8,000-12,000 lines of Rust code for MVP.
+Estimated complexity: ~10,000-15,000 lines of Rust code.

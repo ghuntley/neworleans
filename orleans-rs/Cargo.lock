@@ -542,6 +542,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "orleans-observers"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dashmap",
+ "orleans-core",
+ "parking_lot",
+ "proptest",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "orleans-persistence"
 version = "0.1.0"
 dependencies = [
