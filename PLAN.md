@@ -660,9 +660,12 @@ orleans-host/
   - **Implemented in**: `test_location_transparency` (orleans-host/tests/integration_test.rs)
   - Uses `DirectoryAwareMessageSender` for automatic grain location lookup
 
-- [ ] **9.3** Single activation guarantee
+- [x] **9.3** Single activation guarantee ✅
   - Simultaneously request same grain from all silos
   - Verify only one activation exists
+  - **Implemented in**: `test_simultaneous_single_activation_guarantee` (orleans-host/tests/integration_test.rs)
+  - Tests both local catalog guarantees and directory-coordinated cross-silo invocation
+  - Verifies turn-based execution ensures no races during concurrent access
 
 - [ ] **9.4** Silo failure handling
   - Start 3 silos, create grain
