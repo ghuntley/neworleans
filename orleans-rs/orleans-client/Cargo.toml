@@ -1,0 +1,38 @@
+[package]
+name = "orleans-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Orleans ClusterClient - External client for connecting to Orleans clusters"
+
+[dependencies]
+# Core Orleans dependencies
+orleans-core = { path = "../orleans-core" }
+orleans-messaging = { path = "../orleans-messaging" }
+orleans-clustering = { path = "../orleans-clustering" }
+orleans-runtime = { path = "../orleans-runtime" }
+orleans-telemetry = { path = "../orleans-telemetry" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tokio-util = { workspace = true }
+
+# Utilities
+bytes = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+proptest = { workspace = true }

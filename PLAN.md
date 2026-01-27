@@ -615,7 +615,7 @@ orleans-codegen/
   5. Shutdown message center
   6. Mark silo as Stopped
 
-- [ ] **8.5** Implement `ClusterClient` (deferred - not required for MVP)
+- [x] **8.5** Implement `ClusterClient` → **Implemented in Phase 18**
   - External client that connects to cluster
   - Discovers silos via membership table
   - Routes requests through gateway silo
@@ -1756,6 +1756,121 @@ state.abort(info.transaction_id, None).await?;
 
 ---
 
+## Phase 18: ClusterClient ✅
+
+**Objective**: Implement external client for connecting to Orleans clusters without being a silo.
+
+**Status**: COMPLETE - 62 unit tests and 3 doc tests passing.
+
+### Tasks
+
+- [x] **18.1** Define error types for client operations
+  - `ClientError` enum with variants: NotConnected, AlreadyConnected, Connecting, GatewayConnectionFailed, NoGatewaysAvailable, GatewayDisconnected, RequestTimeout, RequestRejected, Serialization, Deserialization, Network, Configuration, Internal, ShuttingDown, CallbackNotFound, Lifecycle, Messaging, Membership
+  - `ClientResult<T>` type alias
+  - `ClientStatus` enum: Created, Connecting, Connected, Disconnecting, Disconnected
+
+- [x] **18.2** Implement `ClientOptions` configuration
+  - `cluster_id`, `service_id` for cluster identification
+  - `gateway_endpoints` for static gateway addresses
+  - `response_timeout` (default: 30s)
+  - `gateway_refresh_interval` (default: 60s)
+  - `reconnect_delay` (default: 1s)
+  - `max_pending_requests` (default: 10,000)
+  - `max_retry_attempts` (default: 3)
+  - `auto_reconnect` (default: true)
+  - Builder pattern with validation
+
+- [x] **18.3** Implement `GatewayOptions` and `GatewayStatus`
+  - Gateway status: Healthy, Degraded, Unhealthy, Recovering
+  - `GatewayInfo` for tracking gateway health and statistics
+  - Configurable failure threshold and recovery period
+  - Health check timeout settings
+
+- [x] **18.4** Implement `CallbackDataManager`
+  - Request/response correlation via `CorrelationId`
+  - `CallbackData` with request, sender channel, timeout tracking
+  - `add(request, timeout)` returns oneshot receiver
+  - `try_complete(response)` matches and completes callbacks
+  - `fail(correlation_id, error)` for error handling
+  - `expire_timed_out()` for automatic cleanup
+  - `fail_all(error)` for shutdown
+  - Background expiration task with cancellation support
+
+- [x] **18.5** Implement `GatewayManager`
+  - Manages connections to gateway silos
+  - Round-robin and preferred gateway selection
+  - Gateway health tracking with failure/success recording
+  - Automatic gateway discovery from membership table
+  - Gateway recovery for unhealthy connections
+  - Background refresh and recovery tasks
+
+- [x] **18.6** Implement `ClusterClient`
+  - Main client struct implementing grain factory
+  - `connect()` and `disconnect()` lifecycle methods
+  - `get_grain_reference()` and `get_grain<T>()` for grain access
+  - Message receiver task for response handling
+  - Integration with `GrainFactory` for type-safe grain access
+  - Virtual client address for message routing
+  - Structured logging via `tracing` crate
+
+- [x] **18.7** Implement `ClientBuilder`
+  - Fluent builder pattern for client configuration
+  - `with_cluster_id()`, `with_service_id()`, `with_gateway()`
+  - `with_response_timeout()`, `with_max_retry_attempts()`
+  - `with_membership_table()` for auto-discovery
+  - `build()` and `build_and_connect()` for client creation
+
+### Crate Structure
+```
+orleans-client/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs       # ClientError, ClientResult, ClientStatus
+│   ├── options.rs     # ClientOptions, GatewayOptions
+│   ├── callback.rs    # CallbackData, CallbackDataManager
+│   ├── gateway.rs     # GatewayManager, GatewayInfo, GatewayStatus
+│   ├── client.rs      # ClusterClient
+│   └── builder.rs     # ClientBuilder
+```
+
+### Tests
+- Unit tests: error types (5 tests)
+- Unit tests: client options (12 tests)
+- Unit tests: gateway options (2 tests)
+- Unit tests: callback data manager (9 tests)
+- Unit tests: gateway manager (10 tests)
+- Unit tests: cluster client (10 tests)
+- Unit tests: client builder (14 tests)
+- Async tests: callback response handling (3 tests)
+- Doc tests: public API examples (3 tests)
+
+### Usage Example
+```rust
+use orleans_client::{ClientBuilder, ClusterClient};
+use std::time::Duration;
+
+// Build and connect the client
+let client = ClientBuilder::new()
+    .with_cluster_id("my-cluster")
+    .with_service_id("my-app")
+    .with_gateway("10.0.0.1:30000".parse()?)
+    .with_gateway("10.0.0.2:30000".parse()?)
+    .with_response_timeout(Duration::from_secs(30))
+    .build()?;
+
+client.connect().await?;
+
+// Get grain references and invoke methods
+// let grain = client.get_grain::<IMyGrain>("my-key").await?;
+// let result = grain.my_method("argument").await?;
+
+// Disconnect when done
+client.disconnect().await?;
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -1776,6 +1891,7 @@ orleans-rs/
 ├── orleans-observers/      # Observers and callbacks
 ├── orleans-streaming/      # Reactive pub/sub streaming
 ├── orleans-transactions/   # ACID transactions with 2PC
+├── orleans-client/         # ClusterClient for external applications
 ├── orleans-host/           # Silo assembly
 └── orleans-tests/          # Integration tests
 ```
@@ -1822,7 +1938,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 791+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 40 host including 22 property tests)
+7. ✅ **All tests pass** - 856+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 62 client, 40 host including 22 property tests)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -1886,6 +2002,8 @@ Phase 15 (Observers)   ←── Phase 1 (Identity) + tokio
 Phase 16 (Streaming)   ←── Phase 1 (Identity) + Phase 15 (Observers) + tokio
 
 Phase 17 (Transactions) ←── Phase 1 (Identity) + Phase 11 (Persistence) + tokio
+
+Phase 18 (ClusterClient) ←── Phase 1 (Identity) + Phase 3 (Messaging) + Phase 4 (Clustering) + Phase 6 (Runtime)
 ```
 
-Estimated complexity: ~15,000-22,000 lines of Rust code.
+Estimated complexity: ~16,000-24,000 lines of Rust code.
