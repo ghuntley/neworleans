@@ -717,10 +717,22 @@ orleans-host/
   - **Implemented in**: `test_cross_process_grain_invocation` (orleans-host/tests/cross_process_grain_test.rs)
   - **Additional tests**: `test_single_silo_grain_creation`, `test_single_silo_grain_invocation`
 
-- [ ] **9.7** Silo failure handling (Future work)
+- [x] **9.7** Silo failure handling ✅
   - Start 3 silos, create grain
   - Kill silo hosting grain
   - Call grain, verify it re-activates on another silo
+  - **Implemented in**: `failure_handling_test.rs` (orleans-host/tests/)
+  - **Features implemented**:
+    - `DirectoryAwareMessageSender` with retry logic (up to 3 attempts)
+    - Directory cache invalidation when silo fails
+    - Automatic failover to alternative silos
+    - Single activation guarantee maintained during failover
+  - **Tests**: 5 tests covering:
+    - `test_silo_failure_detection` (9.7.1)
+    - `test_grain_reactivation_after_failure` (9.7.2)
+    - `test_retry_logic_on_connection_failure` (9.7.3)
+    - `test_directory_cache_invalidation` (9.7.4)
+    - `test_single_activation_during_failover` (9.7.5)
 
 - [ ] **9.8** Grain state isolation (Future work)
   - Create grain, set state

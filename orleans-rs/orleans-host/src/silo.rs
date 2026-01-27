@@ -78,11 +78,22 @@ impl MessageSender for MessageCenterSender {
 ///
 /// This sender consults the grain directory to find the target silo for a grain,
 /// enabling cross-silo grain invocation with location transparency.
+///
+/// It also implements failure handling with retry logic:
+/// - When a request fails due to silo unavailability, it invalidates the cache
+/// - Retries by finding the new primary silo
+/// - Supports configurable max retries
 struct DirectoryAwareMessageSender {
     center: Arc<MessageCenter>,
     directory: Arc<DistributedGrainDirectory>,
     local_silo: SiloAddress,
 }
+
+/// Maximum number of retry attempts for failed requests.
+const MAX_RETRY_ATTEMPTS: u32 = 3;
+
+/// Delay between retry attempts (in milliseconds).
+const RETRY_DELAY_MS: u64 = 100;
 
 impl MessageSender for DirectoryAwareMessageSender {
     fn send_request(
@@ -102,75 +113,197 @@ impl MessageSender for DirectoryAwareMessageSender {
                 message
             };
 
-            let grain_id = message.target_grain();
+            let grain_id = message.target_grain().clone();
+            let mut last_error: Option<orleans_runtime::RuntimeError> = None;
+            let mut tried_silos: Vec<SiloAddress> = Vec::new();
 
-            // Determine target silo:
-            // 1. If message already has a target_silo, use it
-            // 2. Otherwise, look up in directory
-            // 3. If not in directory, get the primary silo from consistent hash
-            let target_silo = if let Some(silo) = message.target_silo() {
-                silo.clone()
-            } else {
-                // Try to look up in directory first
-                match directory.lookup(grain_id).await {
-                    Ok(Some(address)) => {
-                        if let Some(silo) = address.silo_address() {
+            // Retry loop for handling silo failures
+            for attempt in 0..MAX_RETRY_ATTEMPTS {
+                // Determine target silo:
+                // 1. If message already has a target_silo (and this is first attempt), use it
+                // 2. Otherwise, look up in directory (skip cache if retrying)
+                // 3. If not in directory, get the primary silo from consistent hash
+                let target_silo = if attempt == 0 && message.target_silo().is_some() {
+                    message.target_silo().unwrap().clone()
+                } else {
+                    // On retry, skip the cache and go directly to the directory/ring
+                    let silo = if attempt > 0 {
+                        // Invalidate cache entry for the grain since the previous silo failed
+                        if let Some(failed_silo) = tried_silos.last() {
                             debug!(
                                 grain_id = %grain_id,
-                                silo = %silo,
-                                "Found grain in directory"
+                                failed_silo = %failed_silo,
+                                attempt = attempt,
+                                "Invalidating cache after silo failure"
                             );
-                            silo.clone()
-                        } else {
-                            // Address doesn't have silo, use primary
-                            directory.get_primary_silo(grain_id)
-                                .map_err(|e| orleans_runtime::RuntimeError::Internal(
-                                    format!("Failed to get primary silo: {}", e)
-                                ))?
+                            directory.cache().invalidate_silo(failed_silo);
                         }
-                    }
-                    Ok(None) => {
-                        // Not in directory, get primary silo to handle activation
-                        let primary = directory.get_primary_silo(grain_id)
+
+                        // Get primary silo from the hash ring (skipping cache)
+                        let primary = directory.get_primary_silo(&grain_id)
                             .map_err(|e| orleans_runtime::RuntimeError::Internal(
                                 format!("Failed to get primary silo: {}", e)
                             ))?;
-                        debug!(
-                            grain_id = %grain_id,
-                            primary = %primary,
-                            "Grain not in directory, routing to primary silo"
-                        );
-                        primary
+
+                        // If primary was already tried, try to find an alternative
+                        if tried_silos.contains(&primary) {
+                            // Get all silos from the ring and pick one we haven't tried
+                            let all_silos = directory.ring().get_silos();
+                            let alternative = all_silos.iter()
+                                .find(|s| !tried_silos.contains(s))
+                                .cloned();
+
+                            if let Some(alt) = alternative {
+                                debug!(
+                                    grain_id = %grain_id,
+                                    alternative = %alt,
+                                    "Using alternative silo after primary failed"
+                                );
+                                alt
+                            } else {
+                                // No untried silos available
+                                return Err(orleans_runtime::RuntimeError::Internal(
+                                    format!("All silos have been tried for grain {}", grain_id)
+                                ));
+                            }
+                        } else {
+                            primary
+                        }
+                    } else {
+                        // First attempt: try directory lookup
+                        match directory.lookup(&grain_id).await {
+                            Ok(Some(address)) => {
+                                if let Some(silo) = address.silo_address() {
+                                    debug!(
+                                        grain_id = %grain_id,
+                                        silo = %silo,
+                                        "Found grain in directory"
+                                    );
+                                    silo.clone()
+                                } else {
+                                    directory.get_primary_silo(&grain_id)
+                                        .map_err(|e| orleans_runtime::RuntimeError::Internal(
+                                            format!("Failed to get primary silo: {}", e)
+                                        ))?
+                                }
+                            }
+                            Ok(None) => {
+                                let primary = directory.get_primary_silo(&grain_id)
+                                    .map_err(|e| orleans_runtime::RuntimeError::Internal(
+                                        format!("Failed to get primary silo: {}", e)
+                                    ))?;
+                                debug!(
+                                    grain_id = %grain_id,
+                                    primary = %primary,
+                                    "Grain not in directory, routing to primary silo"
+                                );
+                                primary
+                            }
+                            Err(e) => {
+                                warn!(
+                                    grain_id = %grain_id,
+                                    error = %e,
+                                    "Directory lookup failed, using primary silo"
+                                );
+                                directory.get_primary_silo(&grain_id)
+                                    .map_err(|e| orleans_runtime::RuntimeError::Internal(
+                                        format!("Failed to get primary silo: {}", e)
+                                    ))?
+                            }
+                        }
+                    };
+                    silo
+                };
+
+                // Track this silo as tried
+                if !tried_silos.contains(&target_silo) {
+                    tried_silos.push(target_silo.clone());
+                }
+
+                debug!(
+                    grain_id = %grain_id,
+                    target_silo = %target_silo,
+                    local_silo = %local_silo,
+                    attempt = attempt,
+                    "Sending request"
+                );
+
+                // Attempt to send the request
+                let result = center.request(
+                    grain_id.clone(),
+                    target_silo.clone(),
+                    message.interface_type().clone(),
+                    message.method_id(),
+                    message.body().clone(),
+                ).await;
+
+                match result {
+                    Ok(response) => {
+                        // Check if the response is a rejection that indicates silo failure
+                        if let Some(rejection_info) = response.rejection_info() {
+                            use orleans_messaging::RejectionType;
+                            match rejection_info.rejection_type() {
+                                RejectionType::SiloUnavailable | RejectionType::Transient => {
+                                    // Silo is unavailable, retry on another silo
+                                    warn!(
+                                        grain_id = %grain_id,
+                                        target_silo = %target_silo,
+                                        rejection = ?rejection_info.rejection_type(),
+                                        attempt = attempt,
+                                        "Request rejected due to silo unavailability, will retry"
+                                    );
+                                    last_error = Some(orleans_runtime::RuntimeError::Internal(
+                                        format!("Silo {} unavailable: {}", target_silo, rejection_info.message())
+                                    ));
+
+                                    // Wait before retry
+                                    if attempt < MAX_RETRY_ATTEMPTS - 1 {
+                                        tokio::time::sleep(Duration::from_millis(RETRY_DELAY_MS * (attempt as u64 + 1))).await;
+                                    }
+                                    continue;
+                                }
+                                _ => {
+                                    // Other rejection types are not retryable
+                                    return Ok(response);
+                                }
+                            }
+                        } else {
+                            // Successful response
+                            if attempt > 0 {
+                                info!(
+                                    grain_id = %grain_id,
+                                    target_silo = %target_silo,
+                                    attempts = attempt + 1,
+                                    "Request succeeded after retry"
+                                );
+                            }
+                            return Ok(response);
+                        }
                     }
                     Err(e) => {
+                        // Network or other error - might be silo failure
                         warn!(
                             grain_id = %grain_id,
+                            target_silo = %target_silo,
                             error = %e,
-                            "Directory lookup failed, using primary silo"
+                            attempt = attempt,
+                            "Request failed, will retry on another silo"
                         );
-                        directory.get_primary_silo(grain_id)
-                            .map_err(|e| orleans_runtime::RuntimeError::Internal(
-                                format!("Failed to get primary silo: {}", e)
-                            ))?
+                        last_error = Some(orleans_runtime::RuntimeError::Internal(e.to_string()));
+
+                        // Wait before retry
+                        if attempt < MAX_RETRY_ATTEMPTS - 1 {
+                            tokio::time::sleep(Duration::from_millis(RETRY_DELAY_MS * (attempt as u64 + 1))).await;
+                        }
+                        continue;
                     }
                 }
-            };
+            }
 
-            debug!(
-                grain_id = %grain_id,
-                target_silo = %target_silo,
-                local_silo = %local_silo,
-                "Sending request"
-            );
-
-            // Use the request method which properly tracks correlation
-            center.request(
-                message.target_grain().clone(),
-                target_silo,
-                message.interface_type().clone(),
-                message.method_id(),
-                message.body().clone(),
-            ).await.map_err(|e| orleans_runtime::RuntimeError::Internal(e.to_string()))
+            // All retries exhausted
+            Err(last_error.unwrap_or_else(|| orleans_runtime::RuntimeError::Internal(
+                format!("All {} retry attempts failed for grain {}", MAX_RETRY_ATTEMPTS, grain_id)
+            )))
         })
     }
 
