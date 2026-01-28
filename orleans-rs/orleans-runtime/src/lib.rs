@@ -62,6 +62,7 @@ pub mod grain;
 pub mod grain_context;
 pub mod grain_factory;
 pub mod grain_reference;
+pub mod runtime_context;
 pub mod serialize;
 
 // Re-exports for convenience
@@ -77,6 +78,7 @@ pub use grain_factory::{
     IGrainFactory, InterfaceResolver, MapInterfaceResolver,
 };
 pub use grain_reference::{GrainReference, IGrainReference, MessageSender, TypedGrainReference};
+pub use runtime_context::{RuntimeContext, RuntimeContextExt, RuntimeContextGuard};
 pub use serialize::{GrainDeserialize, GrainSerialize};
 
 #[cfg(test)]
