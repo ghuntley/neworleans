@@ -2758,6 +2758,568 @@ Phase 22 (Version Tolerance) ←── Phase 2 (Serialization) + Phase 7 (Codege
 Phase 23 (Security)    ←── Phase 1 (Identity) + tokio-rustls + rustls
 
 Phase 24 (Migration)   ←── Phase 1 (Identity) + Phase 6 (Runtime) + tokio
+
+Phase 25 (PostgreSQL)  ←── Phase 4 (Clustering) + Phase 11 (Persistence) + Phase 13 (Reminders) + sqlx
+
+Phase 26 (S3 Storage)  ←── Phase 9 (Streaming) + aws-sdk-s3
+
+Phase 27 (Network Tests) ←── All above phases
+
+Phase 28 (Event Sourcing) ←── Phase 11 (Persistence) + Phase 17 (Transactions)
+
+Phase 29 (Chaos Testing) ←── Phase 27 (Network Tests)
+
+Phase 30 (Benchmarks)  ←── All above phases + criterion
+
+Phase 31 (Queue Adapters) ←── Phase 16 (Streaming) + rdkafka/lapin
 ```
 
-Estimated complexity: ~22,000-30,000 lines of Rust code.
+Estimated complexity: ~35,000-45,000 lines of Rust code.
+
+---
+
+# Post-MVP Phases
+
+The following phases extend Orleans-RS beyond the MVP with production-grade storage backends,
+comprehensive testing infrastructure, and advanced features.
+
+---
+
+## Phase 25: PostgreSQL Storage Provider ⏳
+
+**Objective**: Implement PostgreSQL as a production-grade storage backend for membership tables, grain state persistence, and reminder storage.
+
+**Status**: PLANNED
+
+### Tasks
+
+- [ ] **25.1** Define database schema for Orleans tables
+  - `membership` table with silo address, status, heartbeat, suspect votes
+  - `grain_state` table with grain_id, grain_type, state_json, etag, last_modified
+  - `reminders` table with grain_id, reminder_name, start_at, period, etag
+  - Indexes for efficient lookups by hash ranges and grain IDs
+
+- [ ] **25.2** Implement `PostgresMembershipTable`
+  - Implements `IMembershipTable` trait
+  - Connection pooling with `sqlx::PgPool`
+  - Optimistic concurrency with ETags/row versions
+  - `read_all()`, `read_row()`, `insert_row()`, `update_row()`, `update_i_am_alive()`
+  - Transaction support for atomic membership updates
+
+- [ ] **25.3** Implement `PostgresGrainStorage`
+  - Implements `IGrainStorage` trait
+  - `read_state()`, `write_state()`, `clear_state()`
+  - JSON serialization with optional compression
+  - ETag-based optimistic concurrency control
+  - Configurable serialization format (JSON, CBOR, binary)
+
+- [ ] **25.4** Implement `PostgresReminderTable`
+  - Implements `IReminderTable` trait
+  - `read_rows()`, `read_row()`, `read_rows_in_range()`, `upsert_row()`, `remove_row()`
+  - Hash range queries for silo ownership
+  - ETag-based optimistic concurrency
+
+- [ ] **25.5** Implement connection management
+  - `PostgresOptions` configuration (connection string, pool size, timeouts)
+  - Connection pool health monitoring
+  - Automatic reconnection on failure
+  - Connection string encryption for secrets
+
+- [ ] **25.6** Implement schema migrations
+  - Version-controlled schema migrations
+  - `migrate()` method for automatic schema setup
+  - Backward-compatible schema evolution
+  - Migration status tracking
+
+### Crate Structure
+```
+orleans-persistence-postgres/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs           # PostgresError, PostgresResult
+│   ├── options.rs         # PostgresOptions configuration
+│   ├── membership.rs      # PostgresMembershipTable
+│   ├── grain_storage.rs   # PostgresGrainStorage
+│   ├── reminder_table.rs  # PostgresReminderTable
+│   ├── schema.rs          # Schema definitions and migrations
+│   └── pool.rs            # Connection pool management
+├── migrations/
+│   ├── 001_membership.sql
+│   ├── 002_grain_state.sql
+│   └── 003_reminders.sql
+```
+
+### Tests
+- Unit tests: connection management (8 tests)
+- Unit tests: schema operations (6 tests)
+- Integration tests: membership table CRUD (12 tests)
+- Integration tests: grain storage CRUD (10 tests)
+- Integration tests: reminder table operations (8 tests)
+- Integration tests: concurrent access patterns (6 tests)
+- Property tests: ETag consistency (4 tests)
+
+### Dependencies
+```toml
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio", "tls-rustls", "json", "uuid", "chrono"] }
+```
+
+---
+
+## Phase 26: S3 Storage Provider ⏳
+
+**Objective**: Implement AWS S3-compatible object storage for large grain state, event logs, and stream checkpoints.
+
+**Status**: PLANNED
+
+### Tasks
+
+- [ ] **26.1** Implement `S3GrainStorage`
+  - Implements `IGrainStorage` trait
+  - Object key format: `{bucket}/{grain_type}/{grain_id}/state.bin`
+  - ETag-based optimistic concurrency via S3 conditional requests
+  - Configurable serialization format
+  - Optional compression (gzip, zstd)
+
+- [ ] **26.2** Implement `S3StreamCheckpointStorage`
+  - Checkpoint persistence for stream consumers
+  - Object key format: `{bucket}/checkpoints/{stream_id}/{consumer_id}.json`
+  - Atomic checkpoint updates with S3 versioning
+
+- [ ] **26.3** Implement `S3EventLogStorage`
+  - Append-only event log for event sourcing
+  - Object key format: `{bucket}/events/{grain_id}/{sequence}.bin`
+  - Batch writes for efficiency
+  - Range reads for event replay
+
+- [ ] **26.4** Implement S3 client configuration
+  - `S3Options` with bucket, region, credentials, endpoint
+  - Support for S3-compatible services (MinIO, LocalStack)
+  - IAM role-based authentication
+  - Custom endpoint for local development
+
+- [ ] **26.5** Implement retry and resilience
+  - Exponential backoff with jitter
+  - Configurable retry policies
+  - Circuit breaker for S3 outages
+  - Request timeout handling
+
+### Crate Structure
+```
+orleans-persistence-s3/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs           # S3Error, S3Result
+│   ├── options.rs         # S3Options configuration
+│   ├── grain_storage.rs   # S3GrainStorage
+│   ├── checkpoint.rs      # S3StreamCheckpointStorage
+│   ├── event_log.rs       # S3EventLogStorage
+│   └── client.rs          # S3 client wrapper with retry logic
+```
+
+### Tests
+- Unit tests: key generation (6 tests)
+- Unit tests: serialization formats (4 tests)
+- Integration tests: grain storage CRUD (10 tests)
+- Integration tests: checkpoint operations (6 tests)
+- Integration tests: event log operations (8 tests)
+- Integration tests: concurrent access (4 tests)
+- Integration tests: S3-compatible endpoints (LocalStack) (4 tests)
+
+### Dependencies
+```toml
+aws-sdk-s3 = "1.0"
+aws-config = "1.0"
+```
+
+---
+
+## Phase 27: Real Network Integration Testing ⏳
+
+**Objective**: Implement comprehensive integration tests with real network communication between separate processes, validating cluster behavior under realistic conditions.
+
+**Status**: PLANNED
+
+### Tasks
+
+- [ ] **27.1** Implement `TestClusterBuilder`
+  - Spawn multiple silo processes
+  - Configurable number of silos (default: 3)
+  - Process lifecycle management (start, stop, kill)
+  - Port allocation and management
+  - Shared configuration via temp files
+
+- [ ] **27.2** Implement process-based silo launcher
+  - `SiloProcess` struct wrapping `std::process::Child`
+  - Stdout/stderr capture for debugging
+  - Health check via HTTP endpoint or TCP probe
+  - Graceful shutdown with timeout
+  - Force kill on test failure
+
+- [ ] **27.3** Implement cluster formation tests
+  - Three silos join and form cluster
+  - Verify all silos see each other as Active
+  - Verify consistent membership table state
+  - Test join/leave/rejoin scenarios
+
+- [ ] **27.4** Implement grain communication tests
+  - Create grain on Silo1, call from Silo2
+  - Verify single activation guarantee across processes
+  - Test grain migration during silo shutdown
+  - Test grain persistence across restarts
+
+- [ ] **27.5** Implement failure scenario tests
+  - Silo crash detection and recovery
+  - Network partition simulation (using iptables/tc on Linux)
+  - Split-brain prevention verification
+  - Grain reactivation after silo failure
+
+- [ ] **27.6** Implement performance tests
+  - Cross-silo call latency measurement
+  - Throughput under load (requests per second)
+  - Memory usage tracking
+  - Connection pool efficiency
+
+### Crate Structure
+```
+orleans-tests-integration/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── cluster_builder.rs  # TestClusterBuilder
+│   ├── silo_process.rs     # SiloProcess management
+│   ├── client_harness.rs   # Test client utilities
+│   └── assertions.rs       # Cluster state assertions
+├── tests/
+│   ├── cluster_formation.rs
+│   ├── grain_communication.rs
+│   ├── failure_scenarios.rs
+│   ├── persistence_integration.rs
+│   └── performance_baseline.rs
+```
+
+### Tests
+- Cluster formation: 3-silo cluster forms correctly
+- Cluster formation: silo join after initial formation
+- Cluster formation: silo graceful leave
+- Grain communication: cross-silo grain invocation
+- Grain communication: grain state persistence
+- Grain communication: reminder firing across silos
+- Failure: silo crash detected within timeout
+- Failure: grain reactivates on healthy silo
+- Failure: directory consistency after recovery
+- Performance: baseline latency measurements
+
+---
+
+## Phase 28: Event Sourcing ⏳
+
+**Objective**: Implement event sourcing infrastructure for grains that need audit trails, temporal queries, or complex state reconstruction.
+
+**Status**: PLANNED
+
+### Tasks
+
+- [ ] **28.1** Define event sourcing core types
+  - `ILogConsistentGrain` trait marker
+  - `ILogViewAdaptor` trait for event log access
+  - `EventEntry<E>` with sequence, timestamp, payload
+  - `LogViewState<S, E>` combining state and events
+
+- [ ] **28.2** Implement `LogViewAdaptorFactory`
+  - Creates adaptors for different storage backends
+  - In-memory adaptor for testing
+  - Pluggable storage provider interface
+
+- [ ] **28.3** Implement `JournaledGrain<S, E>` base
+  - State type `S`, Event type `E`
+  - `apply_event(&mut state, event)` for state transitions
+  - `raise_event(event)` for appending new events
+  - `confirmed_version()` for current sequence number
+
+- [ ] **28.4** Implement event persistence
+  - `IEventStorage` trait for event persistence
+  - In-memory implementation for testing
+  - PostgreSQL implementation using Phase 25
+  - S3 implementation using Phase 26
+
+- [ ] **28.5** Implement snapshot support
+  - Periodic state snapshots for fast recovery
+  - Configurable snapshot interval
+  - Snapshot + events replay for state reconstruction
+
+- [ ] **28.6** Implement temporal queries
+  - `get_state_at_version(version)` - state at specific version
+  - `get_events_since(version)` - events after specific version
+  - `get_events_in_range(from, to)` - events in version range
+
+### Crate Structure
+```
+orleans-event-sourcing/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs           # EventSourcingError, EventSourcingResult
+│   ├── traits.rs          # ILogConsistentGrain, ILogViewAdaptor, IEventStorage
+│   ├── event_entry.rs     # EventEntry, LogViewState
+│   ├── adaptor.rs         # LogViewAdaptor, LogViewAdaptorFactory
+│   ├── journaled_grain.rs # JournaledGrain base implementation
+│   ├── snapshot.rs        # Snapshot management
+│   └── storage/
+│       ├── mod.rs
+│       ├── memory.rs      # InMemoryEventStorage
+│       ├── postgres.rs    # PostgresEventStorage
+│       └── s3.rs          # S3EventStorage
+```
+
+### Tests
+- Unit tests: event entry operations (8 tests)
+- Unit tests: state reconstruction (10 tests)
+- Unit tests: snapshot management (8 tests)
+- Integration tests: journaled grain lifecycle (6 tests)
+- Integration tests: temporal queries (6 tests)
+- Property tests: event sequence invariants (4 tests)
+
+---
+
+## Phase 29: Chaos Testing ⏳
+
+**Objective**: Implement chaos engineering framework for validating cluster resilience under adverse conditions.
+
+**Status**: PLANNED
+
+### Tasks
+
+- [ ] **29.1** Implement fault injection framework
+  - `ChaosController` for orchestrating faults
+  - `FaultInjector` trait for different fault types
+  - Configurable fault schedules and probabilities
+
+- [ ] **29.2** Implement network fault injection
+  - Packet delay injection (simulate latency)
+  - Packet loss injection (simulate unreliable network)
+  - Partition injection (isolate nodes)
+  - Bandwidth throttling
+
+- [ ] **29.3** Implement process fault injection
+  - Silo process kill (SIGKILL)
+  - Silo process pause (SIGSTOP/SIGCONT)
+  - Memory pressure simulation
+  - CPU throttling
+
+- [ ] **29.4** Implement storage fault injection
+  - Storage read failures
+  - Storage write failures
+  - Storage latency injection
+  - Storage corruption simulation
+
+- [ ] **29.5** Implement chaos test scenarios
+  - Random silo failures during operation
+  - Network partition and heal
+  - Storage unavailability and recovery
+  - Cascading failure scenarios
+
+- [ ] **29.6** Implement chaos test reporting
+  - Fault timeline logging
+  - Cluster state snapshots during chaos
+  - Recovery time measurement
+  - Data consistency verification
+
+### Crate Structure
+```
+orleans-chaos/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── controller.rs      # ChaosController
+│   ├── injector.rs        # FaultInjector trait
+│   ├── network.rs         # Network fault injection
+│   ├── process.rs         # Process fault injection
+│   ├── storage.rs         # Storage fault injection
+│   └── reporting.rs       # Chaos test reporting
+├── tests/
+│   ├── random_failures.rs
+│   ├── network_partition.rs
+│   ├── storage_outage.rs
+│   └── cascading_failure.rs
+```
+
+### Tests
+- Chaos: cluster survives random silo kills
+- Chaos: cluster recovers from network partition
+- Chaos: data consistency after storage outage
+- Chaos: grain migration during chaos
+- Chaos: reminder delivery during failures
+
+---
+
+## Phase 30: Performance Benchmarks ⏳
+
+**Objective**: Establish comprehensive performance benchmarks for measuring and tracking Orleans-RS performance characteristics.
+
+**Status**: PLANNED
+
+### Tasks
+
+- [ ] **30.1** Implement micro-benchmarks
+  - Serialization/deserialization throughput
+  - Message encoding/decoding latency
+  - Grain activation/deactivation cost
+  - Directory lookup performance
+
+- [ ] **30.2** Implement macro-benchmarks
+  - End-to-end grain call latency (p50, p95, p99)
+  - Cross-silo call latency
+  - Grain activation rate (activations/second)
+  - Message throughput (messages/second)
+
+- [ ] **30.3** Implement scalability benchmarks
+  - Latency vs cluster size
+  - Throughput vs grain count
+  - Memory usage vs activation count
+  - Connection count vs silo count
+
+- [ ] **30.4** Implement comparison benchmarks
+  - Baseline against in-process calls
+  - Comparison with gRPC/Tarpc
+  - Memory efficiency vs Actix
+
+- [ ] **30.5** Implement continuous benchmarking
+  - Benchmark result storage
+  - Regression detection
+  - Performance trend visualization
+  - CI integration for benchmark runs
+
+### Crate Structure
+```
+orleans-bench/
+├── Cargo.toml
+├── benches/
+│   ├── serialization.rs   # Serialization benchmarks
+│   ├── messaging.rs       # Message throughput benchmarks
+│   ├── activation.rs      # Grain lifecycle benchmarks
+│   ├── directory.rs       # Directory lookup benchmarks
+│   ├── e2e_latency.rs     # End-to-end latency benchmarks
+│   └── scalability.rs     # Scalability benchmarks
+├── src/
+│   ├── lib.rs
+│   ├── harness.rs         # Benchmark harness utilities
+│   └── reporting.rs       # Result collection and reporting
+```
+
+### Benchmark Targets
+- Serialization: >1M messages/sec for small messages
+- Grain call: <1ms p95 latency for local calls
+- Cross-silo call: <5ms p95 latency
+- Activation rate: >10K activations/sec
+- Directory lookup: <100µs p95
+
+### Dependencies
+```toml
+criterion = { version = "0.5", features = ["html_reports"] }
+```
+
+---
+
+## Phase 31: Queue Adapters for Streaming ⏳
+
+**Objective**: Implement queue adapters for integrating Orleans streaming with external message brokers (Kafka, RabbitMQ, etc.).
+
+**Status**: PLANNED
+
+### Tasks
+
+- [ ] **31.1** Implement Kafka adapter
+  - `KafkaQueueAdapter` implementing `IQueueAdapter`
+  - Producer for publishing to Kafka topics
+  - Consumer for reading from Kafka topics
+  - Offset management for checkpointing
+  - Consumer group support
+
+- [ ] **31.2** Implement RabbitMQ adapter
+  - `RabbitMQQueueAdapter` implementing `IQueueAdapter`
+  - Publisher for exchanges/queues
+  - Consumer with acknowledgment
+  - Dead letter queue support
+
+- [ ] **31.3** Implement Azure Service Bus adapter (future)
+  - Queue and topic support
+  - Session support for ordering
+  - Scheduled message delivery
+
+- [ ] **31.4** Implement adapter configuration
+  - `QueueAdapterOptions` base trait
+  - Per-adapter configuration (brokers, auth, etc.)
+  - Connection pool management
+  - Retry policies
+
+- [ ] **31.5** Implement batch processing
+  - Batch message retrieval
+  - Batch acknowledgment
+  - Configurable batch sizes
+  - Backpressure handling
+
+### Crate Structure
+```
+orleans-streaming-kafka/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── adapter.rs         # KafkaQueueAdapter
+│   ├── producer.rs        # Kafka producer
+│   ├── consumer.rs        # Kafka consumer
+│   └── options.rs         # KafkaAdapterOptions
+
+orleans-streaming-rabbitmq/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── adapter.rs         # RabbitMQQueueAdapter
+│   ├── publisher.rs       # RabbitMQ publisher
+│   ├── consumer.rs        # RabbitMQ consumer
+│   └── options.rs         # RabbitMQAdapterOptions
+```
+
+### Tests
+- Integration tests: Kafka produce/consume roundtrip
+- Integration tests: Kafka consumer group behavior
+- Integration tests: RabbitMQ publish/subscribe
+- Integration tests: Dead letter queue handling
+- Integration tests: Backpressure behavior
+
+### Dependencies
+```toml
+# For Kafka
+rdkafka = { version = "0.36", features = ["tokio"] }
+
+# For RabbitMQ
+lapin = "2.3"
+```
+
+---
+
+## Additional Non-MVP Considerations
+
+The following areas are identified for future development beyond the planned phases:
+
+### Observability & Operations
+- **Dashboard UI**: Web-based cluster monitoring and management
+- **Prometheus Metrics**: Export metrics in Prometheus format
+- **OpenTelemetry Integration**: Distributed tracing with OTLP export
+- **Health Check Endpoints**: HTTP endpoints for load balancer health checks
+
+### Security Enhancements
+- **Authorization Filters**: Role-based access control for grain methods
+- **Audit Logging**: Comprehensive audit trail for grain operations
+- **Secrets Management**: Integration with HashiCorp Vault or AWS Secrets Manager
+
+### Cloud-Native Features
+- **Kubernetes Operator**: CRD-based Orleans cluster management
+- **Auto-Scaling**: Scale silos based on load metrics
+- **Service Mesh Integration**: Istio/Linkerd compatibility
+
+### Developer Experience
+- **CLI Tool**: Command-line tool for cluster management
+- **Hot Reload**: Development-time grain code hot reload
+- **Visual Studio Code Extension**: Debugging and diagnostics integration
