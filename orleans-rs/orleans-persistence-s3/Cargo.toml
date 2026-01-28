@@ -1,0 +1,36 @@
+[package]
+name = "orleans-persistence-s3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AWS S3 storage providers for Orleans-RS: grain state, stream checkpoints, and event logs"
+
+[features]
+default = []
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+orleans-persistence = { path = "../orleans-persistence" }
+orleans-streaming = { path = "../orleans-streaming" }
+
+async-trait.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+bytes.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+futures.workspace = true
+
+aws-sdk-s3 = "1.77"
+aws-config = { version = "1.6", features = ["behavior-version-latest"] }
+aws-smithy-types = "1.3"
+flate2 = "1.0"
+zstd = "0.13"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+proptest.workspace = true
+tokio-test.workspace = true

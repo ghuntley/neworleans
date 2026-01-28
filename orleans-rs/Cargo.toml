@@ -23,6 +23,7 @@ members = [
     "orleans-security",
     "orleans-migration",
     "orleans-postgres",
+    "orleans-persistence-s3",
     "orleans-host",
 ]
 
