@@ -5,7 +5,6 @@
 //! - Primitive type serialization
 //! - Identity type creation and hashing
 
-use bytes::BytesMut;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use orleans_core::{ActivationId, GrainAddress, GrainId, GrainType, IdSpan, SiloAddress};
 use orleans_serialization::{read_varint, write_varint, Writer};
@@ -28,10 +27,9 @@ fn bench_varint_encode(c: &mut Criterion) {
     for (value, name) in values {
         group.throughput(Throughput::Elements(1));
         group.bench_with_input(BenchmarkId::new("encode", name), &value, |b, &val| {
-            let mut buffer = BytesMut::with_capacity(16);
+            let mut buffer = [0u8; 16];
             b.iter(|| {
-                buffer.clear();
-                write_varint(&mut buffer, black_box(val));
+                write_varint(black_box(&mut buffer), black_box(val))
             });
         });
     }
@@ -54,15 +52,14 @@ fn bench_varint_decode(c: &mut Criterion) {
 
     for (value, name) in values {
         // Pre-encode the value
-        let mut buffer = BytesMut::with_capacity(16);
-        write_varint(&mut buffer, value);
-        let encoded = buffer.freeze();
+        let mut buffer = [0u8; 16];
+        let len = write_varint(&mut buffer, value);
+        let encoded = &buffer[..len];
 
         group.throughput(Throughput::Elements(1));
-        group.bench_with_input(BenchmarkId::new("decode", name), &encoded, |b, data| {
+        group.bench_with_input(BenchmarkId::new("decode", name), &encoded.to_vec(), |b, data| {
             b.iter(|| {
-                let mut slice = data.as_ref();
-                read_varint(black_box(&mut slice))
+                read_varint(black_box(data.as_slice()))
             });
         });
     }
