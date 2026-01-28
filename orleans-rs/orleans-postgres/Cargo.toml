@@ -1,0 +1,32 @@
+[package]
+name = "orleans-postgres"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PostgreSQL storage providers for Orleans-RS: membership, grain state, and reminders"
+
+[features]
+default = ["runtime-tokio"]
+runtime-tokio = ["sqlx/runtime-tokio"]
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+orleans-clustering = { path = "../orleans-clustering" }
+orleans-persistence = { path = "../orleans-persistence" }
+orleans-reminders = { path = "../orleans-reminders" }
+orleans-directory = { path = "../orleans-directory" }
+
+async-trait.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "chrono", "uuid", "json"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+proptest.workspace = true
