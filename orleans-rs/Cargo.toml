@@ -25,6 +25,7 @@ members = [
     "orleans-postgres",
     "orleans-persistence-s3",
     "orleans-host",
+    "orleans-tests-integration",
 ]
 
 [workspace.package]
