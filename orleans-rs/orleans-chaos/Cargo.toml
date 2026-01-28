@@ -1,0 +1,33 @@
+[package]
+name = "orleans-chaos"
+version = "0.1.0"
+edition = "2021"
+description = "Chaos engineering framework for Orleans-RS cluster resilience testing"
+license = "MIT"
+
+[dependencies]
+# Orleans crates
+orleans-core = { path = "../orleans-core" }
+orleans-clustering = { path = "../orleans-clustering" }
+
+# Async runtime
+tokio = { version = "1", features = ["full", "process", "time", "sync", "io-util", "signal"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+tracing = "0.1"
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+parking_lot = "0.12"
+dashmap = "5"
+
+[dev-dependencies]
+proptest = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tokio-test = "0.4"

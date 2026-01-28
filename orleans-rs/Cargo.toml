@@ -27,6 +27,7 @@ members = [
     "orleans-event-sourcing",
     "orleans-host",
     "orleans-tests-integration",
+    "orleans-chaos",
 ]
 
 [workspace.package]
