@@ -1,0 +1,22 @@
+[package]
+name = "orleans-placement"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Placement strategies and directors for Orleans Rust port"
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+thiserror.workspace = true
+tracing.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tokio-test.workspace = true

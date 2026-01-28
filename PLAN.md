@@ -15,7 +15,7 @@ Three separate Rust processes functioning as a single Orleans cluster where:
 - ~~Observers/Callbacks~~ → **Now implemented in Phase 15**
 - ~~Streaming~~ → **Now implemented in Phase 16**
 - ~~Transactions~~ → **Now implemented in Phase 17**
-- Complex placement strategies (MVP uses hash-based only)
+- ~~Complex placement strategies (MVP uses hash-based only)~~ → **Now implemented in Phase 21**
 - Version tolerance in serialization
 - TLS/Security
 - Graceful grain migration
@@ -2109,6 +2109,147 @@ ctx.shutdown().await?;
 
 ---
 
+## Phase 21: Placement Strategies ✅
+
+**Objective**: Implement advanced placement strategies for production-grade load balancing and resource optimization.
+
+**Status**: COMPLETE - 118 unit tests and 1 doc test passing.
+
+### Tasks
+
+- [x] **21.1** Define error types for placement operations
+  - `PlacementError` enum with variants: NoCompatibleSilos, NoSilosWithRole, AllSilosOverloaded, SiloUnavailable, LocalSiloTerminating, StatisticsUnavailable, InvalidConfiguration, StrategyNotFound, DirectorNotFound, Internal
+  - `PlacementResult<T>` type alias
+  - `is_retryable()` method to identify transient errors
+
+- [x] **21.2** Implement `PlacementStrategy` trait
+  - Common placement strategy interface
+  - `strategy_type()` returns strategy identifier
+  - `name()` for logging
+  - Implementations: RandomPlacement, HashBasedPlacement, PreferLocalPlacement, ActivationCountBasedPlacement, ResourceOptimizedPlacement, SiloRoleBasedPlacement
+
+- [x] **21.3** Implement `PlacementContext` trait
+  - `get_compatible_silos(target)` returns silos that can host the grain
+  - `get_local_silo()` returns the local silo address
+  - `get_silo_status(silo)` returns silo status (Active, ShuttingDown, etc.)
+  - `get_silo_statistics(silo)` returns runtime statistics
+  - `SimplePlacementContext` implementation for testing
+
+- [x] **21.4** Implement `SiloRuntimeStatistics`
+  - CPU usage (0.0-1.0), memory available/max
+  - Activation counts (active, recently used)
+  - `is_overloaded()` check based on configurable thresholds
+  - `normalized_available_memory()` for resource comparisons
+  - `SiloStatisticsCache` with thread-safe DashMap storage
+
+- [x] **21.5** Implement `PlacementDirector` trait and registry
+  - `on_add_activation(strategy, target, context) -> SiloAddress`
+  - `PlacementDirectorRegistry` for strategy-to-director mapping
+  - Utility functions: `select_random()`, `select_by_hash()`, `filter_overloaded()`
+  - `PlacementTarget` with grain identity, type, version, and request context
+
+- [x] **21.6** Implement `RandomPlacementDirector`
+  - Uniform random selection from compatible silos
+  - Honors placement hints when silo is compatible
+
+- [x] **21.7** Implement `HashBasedPlacementDirector`
+  - Deterministic placement using grain ID hash
+  - Same grain always maps to same silo (while cluster topology is stable)
+  - Enables cache affinity for frequently accessed grains
+
+- [x] **21.8** Implement `PreferLocalPlacementDirector`
+  - Prefers local silo when compatible and not terminating
+  - Falls back to random selection from compatible silos
+  - Reduces network hops for grain activations
+
+- [x] **21.9** Implement `ActivationCountPlacementDirector`
+  - "Power of k choices" algorithm (default k=2)
+  - Randomly samples k silos and picks one with lowest activation count
+  - O(k) complexity vs O(n) for full scan
+  - Configurable via `ActivationCountBasedPlacementOptions`
+
+- [x] **21.10** Implement `ResourceOptimizedPlacementDirector`
+  - Multi-dimensional resource scoring
+  - Configurable weights: CPU (default 40%), memory (default 40%), activation count (default 20%)
+  - Local silo preference margin for latency optimization
+  - Filters overloaded silos before scoring
+  - Presets: `balanced()`, `cpu_focused()`, `memory_focused()`
+
+- [x] **21.11** Implement placement options
+  - `ActivationCountBasedPlacementOptions` with `choose_out_of` (k value)
+  - `ResourceOptimizedPlacementOptions` with weight configuration
+  - `PlacementOptions` enum combining all strategy options
+  - Builder pattern for ergonomic configuration
+  - Serialization support with serde
+
+### Crate Structure
+```
+orleans-placement/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs              # Public API, create_default_registry()
+│   ├── error.rs            # PlacementError, PlacementResult
+│   ├── options.rs          # Strategy configuration options
+│   ├── statistics.rs       # SiloRuntimeStatistics, SiloStatisticsCache
+│   ├── strategy.rs         # PlacementStrategy trait, strategy types
+│   ├── context.rs          # PlacementContext, PlacementTarget
+│   ├── director.rs         # PlacementDirector trait, registry, utilities
+│   └── directors/
+│       ├── mod.rs
+│       ├── random.rs
+│       ├── hash_based.rs
+│       ├── prefer_local.rs
+│       ├── activation_count.rs
+│       └── resource_optimized.rs
+```
+
+### Tests
+- Unit tests: error types (10 tests)
+- Unit tests: placement options (12 tests)
+- Unit tests: silo statistics and cache (15 tests)
+- Unit tests: placement strategies (12 tests)
+- Unit tests: placement director utilities (8 tests)
+- Unit tests: random placement director (6 tests)
+- Unit tests: hash-based placement director (6 tests)
+- Unit tests: prefer-local placement director (8 tests)
+- Unit tests: activation-count placement director (10 tests)
+- Unit tests: resource-optimized placement director (8 tests)
+- Integration tests (6 tests)
+- Property-based tests: placement invariants (4 tests)
+- Doc tests: usage examples (1 test)
+
+### Usage Example
+```rust
+use orleans_placement::{
+    create_default_registry, PlacementDirector, SimplePlacementContext,
+    PlacementTarget, SiloRuntimeStatistics, ActivationCountBasedPlacement,
+};
+use orleans_core::{GrainId, GrainType, IdSpan, SiloAddress};
+
+// Create silos
+let silo1 = SiloAddress::new(addr1, 1);
+let silo2 = SiloAddress::new(addr2, 1);
+
+// Create context with statistics
+let context = SimplePlacementContext::new(silo1.clone(), vec![silo1.clone(), silo2.clone()])
+    .with_statistics(silo1.clone(), SiloRuntimeStatistics::new(silo1.clone())
+        .with_activation_count(100)
+        .with_cpu_usage(0.4));
+
+// Create placement target
+let grain_type = GrainType::create("my.grain");
+let grain_id = GrainId::new(grain_type.clone(), IdSpan::from_str("key1"));
+let target = PlacementTarget::new(grain_id, grain_type);
+
+// Use registry to get director and select silo
+let registry = create_default_registry();
+let director = registry.get("ActivationCountBasedPlacement").unwrap();
+let strategy = ActivationCountBasedPlacement::default();
+let selected = director.on_add_activation(&strategy, &target, &context).await?;
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -2132,6 +2273,7 @@ orleans-rs/
 ├── orleans-versioning/        # Interface versioning for rolling upgrades
 ├── orleans-client/            # ClusterClient for external applications
 ├── orleans-stateless-workers/ # High-throughput parallelizable grains
+├── orleans-placement/         # Advanced placement strategies
 ├── orleans-host/              # Silo assembly
 └── orleans-tests/             # Integration tests
 ```
@@ -2178,7 +2320,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 1043+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 106 versioning, 62 client, 81 stateless-workers, 40 host including 30 property tests)
+7. ✅ **All tests pass** - 1162+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 106 versioning, 62 client, 81 stateless-workers, 119 placement, 40 host including 30 property tests)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -2213,6 +2355,12 @@ The MVP is complete! All core criteria have been achieved:
     - Verified by: `orleans-stateless-workers` crate with 81 unit tests
     - Features: PID controller for adaptive pool sizing, worker state tracking, placement director, context coordinator
     - Multiple activations per grain identity for parallel processing
+
+17. ✅ **Advanced Placement Strategies** - Production-grade load balancing and resource optimization
+    - Verified by: `orleans-placement` crate with 118 unit tests and 1 doc test
+    - Features: RandomPlacement, HashBasedPlacement, PreferLocalPlacement, ActivationCountBasedPlacement, ResourceOptimizedPlacement
+    - Power-of-k-choices algorithm for efficient load balancing
+    - Multi-dimensional resource scoring with configurable weights
 
 ---
 
@@ -2257,6 +2405,8 @@ Phase 18 (ClusterClient) ←── Phase 1 (Identity) + Phase 3 (Messaging) + Ph
 Phase 19 (Versioning)   ←── Phase 1 (Identity) + Phase 5 (Directory)
 
 Phase 20 (Stateless Workers) ←── Phase 1 (Identity) + Phase 6 (Runtime) + tokio
+
+Phase 21 (Placement)   ←── Phase 1 (Identity) + Phase 4 (Clustering) + rand
 ```
 
-Estimated complexity: ~18,000-26,000 lines of Rust code.
+Estimated complexity: ~20,000-28,000 lines of Rust code.
