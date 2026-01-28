@@ -20,6 +20,7 @@ members = [
     "orleans-client",
     "orleans-stateless-workers",
     "orleans-placement",
+    "orleans-security",
     "orleans-host",
 ]
 

@@ -17,7 +17,7 @@ Three separate Rust processes functioning as a single Orleans cluster where:
 - ~~Transactions~~ → **Now implemented in Phase 17**
 - ~~Complex placement strategies (MVP uses hash-based only)~~ → **Now implemented in Phase 21**
 - ~~Version tolerance in serialization~~ → **Now implemented in Phase 22**
-- TLS/Security
+- ~~TLS/Security~~ → **Now implemented in Phase 23**
 - Graceful grain migration
 
 ---
@@ -2318,6 +2318,118 @@ orleans-codegen/tests/derive_serialize_tests.rs
 
 ---
 
+## Phase 23: TLS/Security ✅
+
+**Objective**: Implement TLS encryption for Orleans cluster communication, including mTLS support, certificate management, and secure connection handling.
+
+**Status**: COMPLETE - 51 unit tests and 2 doc tests passing.
+
+### Tasks
+
+- [x] **23.1** Define error types for security operations
+  - `SecurityError` enum with variants: HandshakeFailed, HandshakeTimeout, CertificateNotFound, InvalidCertificate, PrivateKeyNotFound, InvalidPrivateKey, CertificateKeyMismatch, CertificateValidationFailed, CertificateExpired, RemoteCertificateRequired, etc.
+  - `SecurityResult<T>` type alias
+  - `is_retryable()`, `is_certificate_error()`, `is_configuration_error()` helper methods
+
+- [x] **23.2** Implement TLS options and configuration
+  - `RemoteCertificateMode` enum: NoCertificate, AllowCertificate, RequireCertificate
+  - `TlsProtocol` enum: Tls12, Tls13
+  - `CertificateSource` enum: PemFile, Pkcs12, InMemory, SelfSigned
+  - `TlsOptions` struct with builder pattern
+  - Presets: `for_testing()`, `production_mtls()`, `production_server_only()`
+
+- [x] **23.3** Implement certificate loading and generation
+  - `LoadedCertificate` struct with chain, private key, and metadata
+  - `load_certificate(source)` - loads from any CertificateSource
+  - `load_pem_certificate(cert_path, key_path)` - PEM file loading
+  - `load_in_memory_certificate(cert_pem, key_pem)` - in-memory PEM
+  - `generate_self_signed_certificate(cn, sans, days)` - self-signed for testing
+  - `load_ca_certificates(path)` - CA certificate loading from file or directory
+  - Certificate metadata extraction: common name, SANs, EKU (server/client auth)
+  - Validity checking: `is_valid()`, `time_until_expiration()`, `expires_within()`
+
+- [x] **23.4** Implement TLS configuration builders
+  - `build_server_config(options)` - creates rustls ServerConfig
+  - `build_client_config(options)` - creates rustls ClientConfig
+  - Client certificate verification based on RemoteCertificateMode
+  - Root certificate store with system roots and custom CAs
+  - Insecure verifiers for testing (with warnings)
+  - ALPN protocol support (Orleans1)
+
+- [x] **23.5** Implement secure stream wrappers
+  - `TlsStream` enum wrapping client/server TLS streams
+  - Implements `AsyncRead` and `AsyncWrite` for transparent I/O
+  - `peer_addr()`, `local_addr()`, `alpn_protocol()`, `protocol_version()`, `negotiated_cipher_suite()`
+  - `SecureAcceptor` for server-side TLS handshake with timeout
+  - `SecureConnector` for client-side TLS handshake with SNI support
+  - `TlsConnectionInfo` for extracting connection details
+
+### TLS Features
+
+| Feature | Support |
+|---------|---------|
+| TLS 1.2 | ✓ |
+| TLS 1.3 | ✓ (default) |
+| Server Authentication | ✓ |
+| Client Authentication (mTLS) | ✓ |
+| ALPN Negotiation | ✓ ("orleans1") |
+| SNI (Server Name Indication) | ✓ |
+| Custom CA Certificates | ✓ |
+| System Root Certificates | ✓ |
+| Self-Signed Certificates | ✓ (testing only) |
+| Certificate Expiration Check | ✓ |
+| Handshake Timeout | ✓ (default: 10s) |
+
+### Crate Structure
+```
+orleans-security/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs           # Public API and integration tests
+│   ├── error.rs         # SecurityError, SecurityResult
+│   ├── options.rs       # TlsOptions, RemoteCertificateMode, CertificateSource
+│   ├── certificate.rs   # LoadedCertificate, certificate loading/generation
+│   ├── config.rs        # TLS configuration builders
+│   └── stream.rs        # TlsStream, SecureAcceptor, SecureConnector
+```
+
+### Tests
+- Unit tests: error types (5 tests)
+- Unit tests: options configuration (10 tests)
+- Unit tests: certificate operations (10 tests)
+- Unit tests: TLS configuration (9 tests)
+- Unit tests: stream operations (8 tests)
+- Integration tests: TLS echo roundtrip (4 tests)
+- Integration tests: ALPN negotiation (1 test)
+- Doc tests: public API examples (2 tests)
+
+### Usage Example
+```rust
+use orleans_security::{TlsOptions, SecureAcceptor, SecureConnector, CertificateSource};
+use std::path::PathBuf;
+
+// For testing with self-signed certificates
+let options = TlsOptions::for_testing();
+let acceptor = SecureAcceptor::new(&options)?;
+let connector = SecureConnector::new(&options)?;
+
+// For production with real certificates
+let options = TlsOptions::production_mtls()
+    .with_certificate(CertificateSource::PemFile {
+        cert_path: PathBuf::from("/etc/orleans/server.crt"),
+        key_path: PathBuf::from("/etc/orleans/server.key"),
+    })
+    .with_custom_ca(PathBuf::from("/etc/orleans/ca.crt"));
+
+// Accept TLS connection (server side)
+let tls_stream = acceptor.accept(tcp_stream).await?;
+
+// Connect with TLS (client side)
+let tls_stream = connector.connect(tcp_stream, "silo.example.com").await?;
+```
+
+---
+
 ## Workspace Structure
 
 ```
@@ -2342,6 +2454,7 @@ orleans-rs/
 ├── orleans-client/            # ClusterClient for external applications
 ├── orleans-stateless-workers/ # High-throughput parallelizable grains
 ├── orleans-placement/         # Advanced placement strategies
+├── orleans-security/          # TLS/Security support
 ├── orleans-host/              # Silo assembly
 └── orleans-tests/             # Integration tests
 ```
@@ -2388,7 +2501,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 1177+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 106 versioning, 62 client, 81 stateless-workers, 119 placement, 40 host, 39 codegen including 34 property tests)
+7. ✅ **All tests pass** - 1228+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 106 versioning, 62 client, 81 stateless-workers, 119 placement, 51 security, 40 host, 39 codegen including 34 property tests)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -2434,6 +2547,11 @@ The MVP is complete! All core criteria have been achieved:
     - Verified by: 15 version tolerance tests (11 unit tests + 4 property-based tests) in `orleans-codegen`
     - Features: Unknown field skipping, default values for missing fields, nested struct version tolerance
     - Enables safe schema evolution without breaking existing deployments
+
+19. ✅ **TLS/Security** - Encrypted cluster communication with mutual TLS support
+    - Verified by: `orleans-security` crate with 51 unit tests and 2 doc tests
+    - Features: TLS 1.2/1.3, mTLS, certificate loading, self-signed cert generation, ALPN negotiation
+    - Secure acceptor/connector for server and client handshakes
 
 ---
 
@@ -2482,6 +2600,8 @@ Phase 20 (Stateless Workers) ←── Phase 1 (Identity) + Phase 6 (Runtime) + 
 Phase 21 (Placement)   ←── Phase 1 (Identity) + Phase 4 (Clustering) + rand
 
 Phase 22 (Version Tolerance) ←── Phase 2 (Serialization) + Phase 7 (Codegen)
+
+Phase 23 (Security)    ←── Phase 1 (Identity) + tokio-rustls + rustls
 ```
 
-Estimated complexity: ~20,000-28,000 lines of Rust code.
+Estimated complexity: ~22,000-30,000 lines of Rust code.
