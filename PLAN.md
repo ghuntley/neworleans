@@ -3362,7 +3362,7 @@ async fn example() -> Result<(), Box<dyn std::error::Error>> {
 
 **Objective**: Establish comprehensive performance benchmarks for measuring and tracking Orleans-RS performance characteristics.
 
-**Status**: COMPLETE - 33 unit tests passing.
+**Status**: COMPLETE - 69 unit tests and 2 doc tests passing.
 
 ### Tasks
 
@@ -3406,12 +3406,15 @@ async fn example() -> Result<(), Box<dyn std::error::Error>> {
 - `src/lib.rs` - BenchmarkConfig, PerformanceTargets
 - `src/harness.rs` - LatencyTimer, BenchmarkStats, TestDataGenerator, BenchmarkRunner
 - `src/reporting.rs` - BenchmarkResult, BenchmarkBaseline, ComparisonResult, BenchmarkStorage, BenchmarkReporter
+- `src/continuous.rs` - ContinuousConfig, ContinuousRunner, ContinuousStorage, BenchmarkHistory, TrendAnalysis, AnalysisReport
+- `src/visualization.rs` - AsciiChart, CsvExporter, HtmlReportGenerator, VisualizationConfig
+- `src/ci.rs` - CiRunner, ExitCode, JUnitTestSuite, GitHubActionsOutput
 
-- [ ] **30.5** Implement continuous benchmarking
-  - Benchmark result storage
-  - Regression detection
-  - Performance trend visualization
-  - CI integration for benchmark runs
+- [x] **30.5** Implement continuous benchmarking
+  - Benchmark result storage (BenchmarkHistory, ContinuousStorage with JSON persistence)
+  - Regression detection (TrendAnalysis with z-score and moving average analysis)
+  - Performance trend visualization (AsciiChart, CsvExporter, HtmlReportGenerator with Chart.js)
+  - CI integration for benchmark runs (JUnit XML output, GitHub Actions annotations, exit codes)
 
 ### Crate Structure
 ```
@@ -3427,7 +3430,10 @@ orleans-bench/
 ├── src/
 │   ├── lib.rs
 │   ├── harness.rs         # Benchmark harness utilities
-│   └── reporting.rs       # Result collection and reporting
+│   ├── reporting.rs       # Result collection and reporting
+│   ├── continuous.rs      # Continuous benchmarking infrastructure
+│   ├── visualization.rs   # Trend visualization (ASCII, CSV, HTML)
+│   └── ci.rs              # CI/CD integration (JUnit, GitHub Actions)
 ```
 
 ### Benchmark Targets

@@ -7,6 +7,8 @@
 //! - **Macro-benchmarks**: End-to-end latency and throughput measurements
 //! - **Scalability benchmarks**: Performance under varying load conditions
 //! - **Reporting**: Result collection and analysis tools
+//! - **Continuous benchmarking**: Historical tracking and regression detection
+//! - **CI integration**: JUnit XML output, GitHub Actions support
 //!
 //! # Benchmark Categories
 //!
@@ -51,12 +53,61 @@
 //! ```bash
 //! cargo bench -p orleans-bench -- --save-baseline main
 //! ```
+//!
+//! # Continuous Benchmarking
+//!
+//! The continuous benchmarking infrastructure tracks performance over time
+//! and detects regressions using statistical analysis:
+//!
+//! ```rust,no_run
+//! use orleans_bench::{ContinuousRunner, ContinuousStorage, ContinuousConfig};
+//! use orleans_bench::reporting::BenchmarkResult;
+//!
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // Set up continuous benchmarking
+//! let runner = ContinuousRunner::with_defaults("target/bench-continuous")?;
+//!
+//! // Record results and detect regressions
+//! // let report = runner.run_analysis(&results)?;
+//! // if report.has_regressions {
+//! //     eprintln!("Performance regressions detected!");
+//! // }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # CI Integration
+//!
+//! Generate JUnit XML and GitHub Actions compatible output:
+//!
+//! ```rust,no_run
+//! use orleans_bench::ci::{CiRunner, ExitCode};
+//! use orleans_bench::continuous::AnalysisReport;
+//!
+//! # fn example(report: &AnalysisReport) -> Result<(), Box<dyn std::error::Error>> {
+//! let ci = CiRunner::new("target/bench-ci")
+//!     .with_github_actions(true)
+//!     .with_junit(true);
+//!
+//! let exit_code = ci.run(report)?;
+//! std::process::exit(exit_code.code());
+//! # }
+//! ```
 
 pub mod harness;
 pub mod reporting;
+pub mod continuous;
+pub mod visualization;
+pub mod ci;
 
 pub use harness::*;
 pub use reporting::*;
+pub use continuous::{
+    ContinuousConfig, ContinuousRunner, ContinuousStorage,
+    BenchmarkHistory, HistoryPoint, TrendAnalysis, AnalysisReport,
+};
+pub use visualization::{AsciiChart, CsvExporter, HtmlReportGenerator, VisualizationConfig};
+pub use ci::{CiRunner, ExitCode, JUnitTestSuite, GitHubActionsOutput};
 
 use std::time::Duration;
 
