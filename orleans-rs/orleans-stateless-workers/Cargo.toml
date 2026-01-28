@@ -1,0 +1,24 @@
+[package]
+name = "orleans-stateless-workers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Stateless worker support for Orleans - high-throughput parallelizable grain operations"
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+orleans-runtime = { path = "../orleans-runtime" }
+orleans-messaging = { path = "../orleans-messaging" }
+
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+proptest = { workspace = true }

@@ -1981,30 +1981,159 @@ println!("Suitable silos: {:?}", result.suitable_silos);
 
 ---
 
+## Phase 20: Stateless Workers ✅
+
+**Objective**: Implement stateless workers - grains designed for high-throughput, parallelizable operations without state preservation between calls.
+
+**Status**: COMPLETE - 81 unit tests passing.
+
+### Tasks
+
+- [x] **20.1** Define error types for stateless worker operations
+  - `StatelessWorkerError` enum with variants: PoolAtCapacity, NoWorkersAvailable, WorkerCreationFailed, WorkerNotFound, InvalidConfiguration, ShuttingDown, MessageRoutingFailed, PidControllerError, ActivationFailed, DeactivationFailed, Internal
+  - `StatelessWorkerResult<T>` type alias
+
+- [x] **20.2** Implement `StatelessWorkerOptions` configuration
+  - `remove_idle_workers` (default: true)
+  - `idle_workers_inspection_period` (default: 500ms)
+  - `min_idle_cycles_before_removal` (default: 1)
+  - `default_max_local_workers` (default: CPU count)
+  - `min_workers` (default: 1)
+  - `activation_timeout` and `deactivation_timeout`
+  - Preset: `for_testing()` with shorter intervals
+
+- [x] **20.3** Implement `StatelessWorkerPlacement`
+  - `max_local` - maximum workers per silo
+  - `remove_idle_workers` - adaptive pool management
+  - `is_using_grain_directory()` returns `false` (no directory lookup)
+
+- [x] **20.4** Implement `PidController` for adaptive pool sizing
+  - Tuned PID constants (Kp=0.433, Ki=0.468, Kd=0.480) via genetic algorithm
+  - `compute(average_waiting_count)` returns control signal
+  - `should_remove_worker(control_signal, min_idle_cycles)` for removal decision
+  - `apply_anti_windup(remaining, previous)` prevents oscillation
+  - Integral term clamping for stability
+
+- [x] **20.5** Implement `WorkerState` for individual worker tracking
+  - `activation_id`, `waiting_count`, `is_executing`, `last_activity`
+  - `enqueue_message()`, `start_processing()`, `finish_processing()`
+  - `is_inactive()` check (not executing AND waiting_count == 0)
+  - `mark_deactivating()` for graceful shutdown
+
+- [x] **20.6** Implement `WorkerPoolStats`
+  - `total_workers`, `active_workers`, `inactive_workers`
+  - `total_waiting`, `average_waiting`, `max_waiting`, `min_waiting`
+  - `from_workers(workers)` factory for statistics computation
+
+- [x] **20.7** Implement `StatelessWorkerDirector` for silo-level placement
+  - `select_silo(local_silo, local_silo_terminating, compatible_silos)`
+  - Prefers local silo for cache locality
+  - Falls back to random selection from compatible silos
+  - `uses_grain_directory()` returns `false`
+
+- [x] **20.8** Implement `StatelessWorkerContext` coordinator
+  - Manages pool of up to `max_local` workers per grain identity per silo
+  - `route_message()` with priority: 1) reuse inactive, 2) create if capacity, 3) least loaded
+  - `worker_start_processing()` and `worker_finish_processing()` lifecycle methods
+  - `collect_idle_workers()` using PID controller for adaptive removal
+  - `shutdown()` for graceful context cleanup
+  - Background inspection timer for idle worker collection
+  - Structured logging via `tracing` crate
+
+### Key Differences from Regular Grains
+
+| Aspect | Regular Grains | Stateless Workers |
+|--------|----------------|-------------------|
+| State preservation | Expected between requests | No expectation |
+| Grain directory registration | Yes | No |
+| Multiple activations | Not allowed (one per grain ID) | Multiple (up to MaxLocal per silo) |
+| Location transparency | Via directory lookup | Direct placement decision |
+| Message ordering | FIFO within grain | Unordered across workers |
+
+### Crate Structure
+```
+orleans-stateless-workers/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── error.rs           # StatelessWorkerError, StatelessWorkerResult
+│   ├── options.rs         # StatelessWorkerOptions, StatelessWorkerPlacement
+│   ├── pid_controller.rs  # PidController with tuned constants
+│   ├── worker_state.rs    # WorkerState, WorkerPoolStats
+│   ├── director.rs        # StatelessWorkerDirector, PlacementContext
+│   └── context.rs         # StatelessWorkerContext, WorkItem
+```
+
+### Tests
+- Unit tests: error types (11 tests)
+- Unit tests: options configuration (11 tests)
+- Unit tests: PID controller (16 tests + 3 property tests)
+- Unit tests: worker state (12 tests)
+- Unit tests: placement director (10 tests + 1 distribution test)
+- Unit tests: context operations (13 tests + 2 property tests)
+- Integration tests: full stateless worker flow (2 tests)
+
+### Usage Example
+```rust
+use orleans_stateless_workers::{
+    StatelessWorkerContext, StatelessWorkerPlacement, StatelessWorkerOptions,
+    StatelessWorkerDirector,
+};
+
+// Configure stateless worker placement
+let placement = StatelessWorkerPlacement::with_max_local(8);
+let options = StatelessWorkerOptions::default();
+
+// Create context (typically managed by runtime)
+let ctx = StatelessWorkerContext::new(
+    grain_id,
+    silo_address,
+    placement,
+    options,
+);
+
+// Start context (begins idle worker collection)
+ctx.start()?;
+
+// Route messages to workers
+let worker_id = ctx.route_message()?;
+
+// Track processing lifecycle
+ctx.worker_start_processing(&worker_id);
+// ... process message ...
+ctx.worker_finish_processing(&worker_id);
+
+// Graceful shutdown
+ctx.shutdown().await?;
+```
+
+---
+
 ## Workspace Structure
 
 ```
 orleans-rs/
 ├── Cargo.toml (workspace)
-├── orleans-core/           # Identity types
-├── orleans-serialization/  # Wire protocol
-├── orleans-codegen/        # Proc macros
-├── orleans-messaging/      # Message passing
-├── orleans-clustering/     # Membership
-├── orleans-directory/      # Grain directory
-├── orleans-runtime/        # Grain hosting
-├── orleans-telemetry/      # Structured logging
-├── orleans-persistence/    # Grain state persistence
-├── orleans-timers/         # Grain timers
-├── orleans-reminders/      # Grain reminders (persistent)
-├── orleans-filters/        # Call filters and interceptors
-├── orleans-observers/      # Observers and callbacks
-├── orleans-streaming/      # Reactive pub/sub streaming
-├── orleans-transactions/   # ACID transactions with 2PC
-├── orleans-versioning/     # Interface versioning for rolling upgrades
-├── orleans-client/         # ClusterClient for external applications
-├── orleans-host/           # Silo assembly
-└── orleans-tests/          # Integration tests
+├── orleans-core/              # Identity types
+├── orleans-serialization/     # Wire protocol
+├── orleans-codegen/           # Proc macros
+├── orleans-messaging/         # Message passing
+├── orleans-clustering/        # Membership
+├── orleans-directory/         # Grain directory
+├── orleans-runtime/           # Grain hosting
+├── orleans-telemetry/         # Structured logging
+├── orleans-persistence/       # Grain state persistence
+├── orleans-timers/            # Grain timers
+├── orleans-reminders/         # Grain reminders (persistent)
+├── orleans-filters/           # Call filters and interceptors
+├── orleans-observers/         # Observers and callbacks
+├── orleans-streaming/         # Reactive pub/sub streaming
+├── orleans-transactions/      # ACID transactions with 2PC
+├── orleans-versioning/        # Interface versioning for rolling upgrades
+├── orleans-client/            # ClusterClient for external applications
+├── orleans-stateless-workers/ # High-throughput parallelizable grains
+├── orleans-host/              # Silo assembly
+└── orleans-tests/             # Integration tests
 ```
 
 ## Dependencies
@@ -2049,7 +2178,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 962+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 106 versioning, 62 client, 40 host including 30 property tests)
+7. ✅ **All tests pass** - 1043+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 106 versioning, 62 client, 81 stateless-workers, 40 host including 30 property tests)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -2079,6 +2208,11 @@ The MVP is complete! All core criteria have been achieved:
 15. ✅ **Interface Versioning** - Rolling upgrades with heterogeneous cluster deployments
     - Verified by: `orleans-versioning` crate with 97 unit tests and 9 doc tests
     - Features: CompatibilityDirector, VersionSelector, GrainVersionManifest, CachedVersionSelectorManager, PlacementTarget
+
+16. ✅ **Stateless Workers** - High-throughput parallelizable grains without state preservation
+    - Verified by: `orleans-stateless-workers` crate with 81 unit tests
+    - Features: PID controller for adaptive pool sizing, worker state tracking, placement director, context coordinator
+    - Multiple activations per grain identity for parallel processing
 
 ---
 
@@ -2121,6 +2255,8 @@ Phase 17 (Transactions) ←── Phase 1 (Identity) + Phase 11 (Persistence) + 
 Phase 18 (ClusterClient) ←── Phase 1 (Identity) + Phase 3 (Messaging) + Phase 4 (Clustering) + Phase 6 (Runtime)
 
 Phase 19 (Versioning)   ←── Phase 1 (Identity) + Phase 5 (Directory)
+
+Phase 20 (Stateless Workers) ←── Phase 1 (Identity) + Phase 6 (Runtime) + tokio
 ```
 
 Estimated complexity: ~18,000-26,000 lines of Rust code.
