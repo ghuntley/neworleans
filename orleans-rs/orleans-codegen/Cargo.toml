@@ -17,6 +17,8 @@ proc-macro2 = "1.0"
 orleans-core = { path = "../orleans-core" }
 orleans-runtime = { path = "../orleans-runtime" }
 orleans-messaging = { path = "../orleans-messaging" }
+orleans-serialization = { path = "../orleans-serialization" }
 async-trait.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 bytes.workspace = true
+proptest = "1"

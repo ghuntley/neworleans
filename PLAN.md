@@ -134,10 +134,11 @@ orleans-core/
 - [x] **2.7** Implement identity type codecs
   - `IdSpan`, `GrainType`, `GrainId`, `SiloAddress`, `ActivationId`, `GrainAddress`
 
-- [ ] **2.8** Implement `#[derive(OrleansSerialize)]` proc macro (basic version)
-  - Generates `IFieldCodec` implementation for structs
-  - Field IDs via `#[id(n)]` attribute
-  - *Deferred to Phase 7 (Codegen) for better integration with grain interfaces*
+- [x] **2.8** Implement `#[derive(OrleansSerialize, OrleansDeserialize)]` proc macros
+  - Generates `FieldSerialize` and `FieldDeserialize` implementations for structs
+  - Field IDs via `#[id(n)]` attribute (auto-assigned if not specified)
+  - Supports nested structs, all primitive types, forward compatibility (unknown fields skipped)
+  - 14 unit tests including 4 property-based tests
 
 ### Crate Structure
 ```

@@ -1,6 +1,9 @@
 //! Procedural macros for Orleans grain code generation.
 //!
-//! This crate provides two main attribute macros:
+//! This crate provides attribute macros for grain definitions and derive macros
+//! for serialization:
+//!
+//! ## Attribute Macros
 //!
 //! - `#[grain_interface]` - Applied to trait definitions to generate grain interface metadata,
 //!   method ID constants, and client proxy implementations.
@@ -8,7 +11,31 @@
 //! - `#[grain]` - Applied to struct definitions to generate grain activators, method invokers,
 //!   and type registration helpers.
 //!
-//! # Example
+//! - `#[grain_impl]` - Applied to impl blocks to generate method invokers.
+//!
+//! ## Derive Macros
+//!
+//! - `#[derive(OrleansSerialize)]` - Generates `FieldSerialize` and `Serialize` implementations.
+//!
+//! - `#[derive(OrleansDeserialize)]` - Generates `FieldDeserialize` and `Deserialize` implementations.
+//!
+//! # Serialization Example
+//!
+//! ```rust,ignore
+//! use orleans_codegen::{OrleansSerialize, OrleansDeserialize};
+//!
+//! #[derive(Default, OrleansSerialize, OrleansDeserialize)]
+//! pub struct PlayerState {
+//!     #[id(0)]
+//!     pub name: String,
+//!     #[id(1)]
+//!     pub score: u32,
+//!     #[id(2)]
+//!     pub level: u32,
+//! }
+//! ```
+//!
+//! # Grain Example
 //!
 //! ```rust,ignore
 //! use orleans_codegen::{grain_interface, grain};
@@ -38,8 +65,9 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use syn::{parse_macro_input, ItemImpl, ItemStruct, ItemTrait};
+use syn::{parse_macro_input, DeriveInput, ItemImpl, ItemStruct, ItemTrait};
 
+mod derive_serialize;
 mod grain;
 mod grain_interface;
 
@@ -185,6 +213,87 @@ pub fn grain_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let impl_block = parse_macro_input!(item as ItemImpl);
     let attr_tokens = TokenStream2::from(attr);
     grain::generate_grain_impl(attr_tokens, impl_block)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Derives the `FieldSerialize` and `Serialize` traits for a struct.
+///
+/// This macro generates implementations that serialize the struct using Orleans'
+/// binary wire protocol with tag-delimited fields.
+///
+/// # Field ID Assignment
+///
+/// Field IDs can be explicitly assigned using the `#[id(n)]` attribute.
+/// If not specified, field IDs are automatically assigned starting from 0.
+///
+/// Explicit IDs are recommended for forward/backward compatibility, as they
+/// allow fields to be added, removed, or reordered without breaking serialization.
+///
+/// # Requirements
+///
+/// All field types must implement `FieldSerialize`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use orleans_codegen::OrleansSerialize;
+///
+/// #[derive(Default, OrleansSerialize)]
+/// pub struct PlayerState {
+///     #[id(0)]
+///     pub name: String,
+///     #[id(1)]
+///     pub score: u32,
+///     #[id(2)]
+///     pub level: u32,
+/// }
+/// ```
+#[proc_macro_derive(OrleansSerialize, attributes(id))]
+pub fn derive_orleans_serialize(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_serialize::generate_field_serialize(input)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Derives the `FieldDeserialize` and `Deserialize` traits for a struct.
+///
+/// This macro generates implementations that deserialize the struct from Orleans'
+/// binary wire protocol with tag-delimited fields.
+///
+/// # Field ID Matching
+///
+/// Field IDs must match those used during serialization. Use `#[id(n)]` to
+/// explicitly specify field IDs. Unspecified IDs default to sequential values.
+///
+/// Unknown fields are automatically skipped, providing forward compatibility
+/// when new fields are added.
+///
+/// # Requirements
+///
+/// - All field types must implement `FieldDeserialize` and `Default`.
+/// - The struct itself should implement or derive `Default`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use orleans_codegen::{OrleansSerialize, OrleansDeserialize};
+///
+/// #[derive(Default, OrleansSerialize, OrleansDeserialize)]
+/// pub struct PlayerState {
+///     #[id(0)]
+///     pub name: String,
+///     #[id(1)]
+///     pub score: u32,
+///     #[id(2)]
+///     pub level: u32,
+/// }
+/// ```
+#[proc_macro_derive(OrleansDeserialize, attributes(id))]
+pub fn derive_orleans_deserialize(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_serialize::generate_field_deserialize(input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
