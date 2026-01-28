@@ -28,6 +28,7 @@ members = [
     "orleans-host",
     "orleans-tests-integration",
     "orleans-chaos",
+    "orleans-bench",
 ]
 
 [workspace.package]

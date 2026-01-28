@@ -1,0 +1,63 @@
+[package]
+name = "orleans-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Performance benchmarks for Orleans-RS"
+publish = false
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+orleans-serialization = { path = "../orleans-serialization" }
+orleans-messaging = { path = "../orleans-messaging" }
+orleans-directory = { path = "../orleans-directory" }
+orleans-runtime = { path = "../orleans-runtime" }
+orleans-clustering = { path = "../orleans-clustering" }
+orleans-codegen = { path = "../orleans-codegen" }
+orleans-telemetry = { path = "../orleans-telemetry" }
+
+tokio = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+rand = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+dashmap = { workspace = true }
+tempfile = "3.10"
+
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+hdrhistogram = "7.5"
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio-test = { workspace = true }
+
+[[bench]]
+name = "serialization"
+harness = false
+
+[[bench]]
+name = "messaging"
+harness = false
+
+[[bench]]
+name = "activation"
+harness = false
+
+[[bench]]
+name = "directory"
+harness = false
+
+[[bench]]
+name = "e2e_latency"
+harness = false
+
+[features]
+default = []
