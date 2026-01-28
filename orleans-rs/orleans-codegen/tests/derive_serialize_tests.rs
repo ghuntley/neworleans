@@ -278,7 +278,7 @@ fn test_sparse_ids_roundtrip() {
 }
 
 // ============================================================================
-// Forward compatibility test (unknown fields are skipped)
+// Version Tolerance Tests - Forward Compatibility (unknown fields are skipped)
 // ============================================================================
 
 #[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
@@ -318,6 +318,365 @@ fn test_forward_compatibility_skips_unknown_fields() {
 
     assert_eq!(decoded.name, "test");
     assert_eq!(decoded.value, 42);
+}
+
+// ============================================================================
+// Version Tolerance Tests - Backward Compatibility (missing fields get defaults)
+// ============================================================================
+
+#[test]
+fn test_backward_compatibility_missing_fields_get_defaults() {
+    // Serialize V1 (older version)
+    let v1 = VersionedStructV1 {
+        name: "old data".to_string(),
+        value: 123,
+    };
+
+    let mut writer = Writer::new();
+    v1.serialize_field(&mut writer, 1);
+
+    // Deserialize as V2 (newer version - should get default for missing field)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = VersionedStructV2::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded.name, "old data");
+    assert_eq!(decoded.value, 123);
+    assert_eq!(decoded.new_field, String::default()); // Should be empty string (default)
+}
+
+// ============================================================================
+// Version Tolerance Tests - Multiple unknown fields
+// ============================================================================
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct VersionedStructV3 {
+    #[id(0)]
+    pub name: String,
+    #[id(1)]
+    pub value: u32,
+    #[id(2)]
+    pub field_a: String,
+    #[id(3)]
+    pub field_b: i64,
+    #[id(4)]
+    pub field_c: bool,
+    #[id(5)]
+    pub field_d: Vec<u8>,
+}
+
+#[test]
+fn test_forward_compatibility_skips_multiple_unknown_fields() {
+    // Serialize V3 with many fields
+    let v3 = VersionedStructV3 {
+        name: "complex".to_string(),
+        value: 999,
+        field_a: "extra a".to_string(),
+        field_b: -12345,
+        field_c: true,
+        field_d: vec![1, 2, 3, 4, 5],
+    };
+
+    let mut writer = Writer::new();
+    v3.serialize_field(&mut writer, 1);
+
+    // Deserialize as V1 (should skip all extra fields)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = VersionedStructV1::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded.name, "complex");
+    assert_eq!(decoded.value, 999);
+}
+
+// ============================================================================
+// Version Tolerance Tests - Sparse field IDs with gaps
+// ============================================================================
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct SparseFieldsOld {
+    #[id(0)]
+    pub a: u32,
+    #[id(5)]
+    pub b: String,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct SparseFieldsNew {
+    #[id(0)]
+    pub a: u32,
+    #[id(2)]
+    pub inserted: i64,  // New field inserted in gap
+    #[id(5)]
+    pub b: String,
+    #[id(10)]
+    pub appended: bool, // New field appended
+}
+
+#[test]
+fn test_forward_compatibility_with_sparse_field_ids() {
+    // Serialize new version with fields in gaps
+    let new_struct = SparseFieldsNew {
+        a: 100,
+        inserted: -500,
+        b: "sparse".to_string(),
+        appended: true,
+    };
+
+    let mut writer = Writer::new();
+    new_struct.serialize_field(&mut writer, 1);
+
+    // Deserialize as old version (should skip inserted and appended fields)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = SparseFieldsOld::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded.a, 100);
+    assert_eq!(decoded.b, "sparse");
+}
+
+#[test]
+fn test_backward_compatibility_with_sparse_field_ids() {
+    // Serialize old version
+    let old_struct = SparseFieldsOld {
+        a: 200,
+        b: "old sparse".to_string(),
+    };
+
+    let mut writer = Writer::new();
+    old_struct.serialize_field(&mut writer, 1);
+
+    // Deserialize as new version (should get defaults for missing fields)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = SparseFieldsNew::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded.a, 200);
+    assert_eq!(decoded.inserted, i64::default()); // Default: 0
+    assert_eq!(decoded.b, "old sparse");
+    assert_eq!(decoded.appended, bool::default()); // Default: false
+}
+
+// ============================================================================
+// Version Tolerance Tests - Nested structs with version differences
+// ============================================================================
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct InnerV1 {
+    #[id(0)]
+    pub x: u32,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct InnerV2 {
+    #[id(0)]
+    pub x: u32,
+    #[id(1)]
+    pub y: String, // New field in V2
+}
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct OuterWithInnerV1 {
+    #[id(0)]
+    pub name: String,
+    #[id(1)]
+    pub inner: InnerV1,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct OuterWithInnerV2 {
+    #[id(0)]
+    pub name: String,
+    #[id(1)]
+    pub inner: InnerV2,
+}
+
+#[test]
+fn test_nested_forward_compatibility() {
+    // Serialize outer with InnerV2
+    let outer_v2 = OuterWithInnerV2 {
+        name: "nested test".to_string(),
+        inner: InnerV2 {
+            x: 42,
+            y: "inner new".to_string(),
+        },
+    };
+
+    let mut writer = Writer::new();
+    outer_v2.serialize_field(&mut writer, 1);
+
+    // Deserialize as outer with InnerV1 (should skip inner's new field)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = OuterWithInnerV1::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded.name, "nested test");
+    assert_eq!(decoded.inner.x, 42);
+}
+
+#[test]
+fn test_nested_backward_compatibility() {
+    // Serialize outer with InnerV1
+    let outer_v1 = OuterWithInnerV1 {
+        name: "old nested".to_string(),
+        inner: InnerV1 { x: 99 },
+    };
+
+    let mut writer = Writer::new();
+    outer_v1.serialize_field(&mut writer, 1);
+
+    // Deserialize as outer with InnerV2 (should get default for inner's new field)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = OuterWithInnerV2::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded.name, "old nested");
+    assert_eq!(decoded.inner.x, 99);
+    assert_eq!(decoded.inner.y, String::default());
+}
+
+// ============================================================================
+// Version Tolerance Tests - Field reordering (same IDs, different order in code)
+// ============================================================================
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct OrderedFieldsA {
+    #[id(0)]
+    pub first: u32,
+    #[id(1)]
+    pub second: String,
+    #[id(2)]
+    pub third: bool,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct OrderedFieldsB {
+    // Same IDs but different declaration order
+    #[id(2)]
+    pub third: bool,
+    #[id(0)]
+    pub first: u32,
+    #[id(1)]
+    pub second: String,
+}
+
+#[test]
+fn test_field_reordering_same_ids() {
+    // Serialize with OrderedFieldsA
+    let a = OrderedFieldsA {
+        first: 1,
+        second: "two".to_string(),
+        third: true,
+    };
+
+    let mut writer = Writer::new();
+    a.serialize_field(&mut writer, 1);
+
+    // Deserialize as OrderedFieldsB (same IDs, different order)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = OrderedFieldsB::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded.first, 1);
+    assert_eq!(decoded.second, "two");
+    assert_eq!(decoded.third, true);
+}
+
+// ============================================================================
+// Version Tolerance Tests - Empty to non-empty struct evolution
+// ============================================================================
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct EvolvingStructEmpty {}
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct EvolvingStructWithFields {
+    #[id(0)]
+    pub new_field: String,
+    #[id(1)]
+    pub another: u32,
+}
+
+#[test]
+fn test_empty_struct_forward_compatibility() {
+    // Serialize struct with fields
+    let with_fields = EvolvingStructWithFields {
+        new_field: "added".to_string(),
+        another: 42,
+    };
+
+    let mut writer = Writer::new();
+    with_fields.serialize_field(&mut writer, 1);
+
+    // Deserialize as empty struct (should skip all fields)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = EvolvingStructEmpty::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded, EvolvingStructEmpty {});
+}
+
+#[test]
+fn test_empty_struct_backward_compatibility() {
+    // Serialize empty struct
+    let empty = EvolvingStructEmpty {};
+
+    let mut writer = Writer::new();
+    empty.serialize_field(&mut writer, 1);
+
+    // Deserialize as struct with fields (should get defaults)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = EvolvingStructWithFields::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded.new_field, String::default());
+    assert_eq!(decoded.another, u32::default());
+}
+
+// ============================================================================
+// Version Tolerance Tests - Different wire types for unknown fields
+// ============================================================================
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct MixedWireTypesNew {
+    #[id(0)]
+    pub kept: u32,
+    #[id(1)]
+    pub varint_field: i64,      // VarInt wire type
+    #[id(2)]
+    pub string_field: String,    // LengthPrefixed wire type
+    #[id(3)]
+    pub bytes_field: Vec<u8>,    // LengthPrefixed wire type
+    #[id(4)]
+    pub nested: InnerV1,         // TagDelimited wire type
+}
+
+#[derive(Debug, Default, Clone, PartialEq, OrleansSerialize, OrleansDeserialize)]
+struct MixedWireTypesOld {
+    #[id(0)]
+    pub kept: u32,
+}
+
+#[test]
+fn test_skip_different_wire_types() {
+    // Serialize with various wire types
+    let new_struct = MixedWireTypesNew {
+        kept: 777,
+        varint_field: -999999,
+        string_field: "to be skipped".to_string(),
+        bytes_field: vec![0xFF, 0xFE, 0xFD],
+        nested: InnerV1 { x: 12345 },
+    };
+
+    let mut writer = Writer::new();
+    new_struct.serialize_field(&mut writer, 1);
+
+    // Deserialize as old version (should correctly skip all different wire types)
+    let mut reader = Reader::new(writer.as_bytes());
+    let _field = reader.read_field_header().unwrap();
+    let decoded = MixedWireTypesOld::deserialize_field(&mut reader).unwrap();
+
+    assert_eq!(decoded.kept, 777);
 }
 
 // ============================================================================
@@ -410,6 +769,117 @@ mod proptests {
             let decoded = BytesStruct::deserialize_field(&mut reader).unwrap();
 
             prop_assert_eq!(original, decoded);
+        }
+
+        // ====================================================================
+        // Version Tolerance Property Tests
+        // ====================================================================
+
+        /// Property: Forward compatibility - V2 data can always be read as V1
+        /// The common fields should always match.
+        #[test]
+        fn prop_forward_compatibility_preserves_common_fields(
+            name in "\\PC{0,50}",
+            value: u32,
+            new_field in "\\PC{0,50}",
+        ) {
+            let v2 = VersionedStructV2 {
+                name: name.clone(),
+                value,
+                new_field,
+            };
+
+            let mut writer = Writer::new();
+            v2.serialize_field(&mut writer, 1);
+
+            let mut reader = Reader::new(writer.as_bytes());
+            let _field = reader.read_field_header().unwrap();
+            let v1 = VersionedStructV1::deserialize_field(&mut reader).unwrap();
+
+            // Common fields must be preserved
+            prop_assert_eq!(v1.name, name);
+            prop_assert_eq!(v1.value, value);
+        }
+
+        /// Property: Backward compatibility - V1 data can always be read as V2
+        /// The common fields should match, new fields should have defaults.
+        #[test]
+        fn prop_backward_compatibility_preserves_common_fields(
+            name in "\\PC{0,50}",
+            value: u32,
+        ) {
+            let v1 = VersionedStructV1 {
+                name: name.clone(),
+                value,
+            };
+
+            let mut writer = Writer::new();
+            v1.serialize_field(&mut writer, 1);
+
+            let mut reader = Reader::new(writer.as_bytes());
+            let _field = reader.read_field_header().unwrap();
+            let v2 = VersionedStructV2::deserialize_field(&mut reader).unwrap();
+
+            // Common fields must be preserved
+            prop_assert_eq!(v2.name, name);
+            prop_assert_eq!(v2.value, value);
+            // New field should be default
+            prop_assert_eq!(v2.new_field, String::default());
+        }
+
+        /// Property: Field ID determines identity, not declaration order
+        /// Structs with same field IDs but different declaration order
+        /// should serialize/deserialize correctly.
+        #[test]
+        fn prop_field_id_determines_identity(
+            first: u32,
+            second in "\\PC{0,30}",
+            third: bool,
+        ) {
+            let a = OrderedFieldsA {
+                first,
+                second: second.clone(),
+                third,
+            };
+
+            let mut writer = Writer::new();
+            a.serialize_field(&mut writer, 1);
+
+            let mut reader = Reader::new(writer.as_bytes());
+            let _field = reader.read_field_header().unwrap();
+            let b = OrderedFieldsB::deserialize_field(&mut reader).unwrap();
+
+            // All fields must match regardless of declaration order
+            prop_assert_eq!(b.first, first);
+            prop_assert_eq!(b.second, second);
+            prop_assert_eq!(b.third, third);
+        }
+
+        /// Property: Nested version tolerance works correctly
+        /// Inner struct version differences should be handled properly.
+        #[test]
+        fn prop_nested_version_tolerance(
+            name in "\\PC{0,30}",
+            x: u32,
+            y in "\\PC{0,30}",
+        ) {
+            // Serialize with InnerV2
+            let outer_v2 = OuterWithInnerV2 {
+                name: name.clone(),
+                inner: InnerV2 { x, y },
+            };
+
+            let mut writer = Writer::new();
+            outer_v2.serialize_field(&mut writer, 1);
+
+            // Deserialize as OuterWithInnerV1
+            let mut reader = Reader::new(writer.as_bytes());
+            let _field = reader.read_field_header().unwrap();
+            let outer_v1 = OuterWithInnerV1::deserialize_field(&mut reader).unwrap();
+
+            // Outer name and inner x should be preserved
+            prop_assert_eq!(outer_v1.name, name);
+            prop_assert_eq!(outer_v1.inner.x, x);
         }
     }
 }

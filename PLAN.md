@@ -16,7 +16,7 @@ Three separate Rust processes functioning as a single Orleans cluster where:
 - ~~Streaming~~ → **Now implemented in Phase 16**
 - ~~Transactions~~ → **Now implemented in Phase 17**
 - ~~Complex placement strategies (MVP uses hash-based only)~~ → **Now implemented in Phase 21**
-- Version tolerance in serialization
+- ~~Version tolerance in serialization~~ → **Now implemented in Phase 22**
 - TLS/Security
 - Graceful grain migration
 
@@ -2251,6 +2251,73 @@ let selected = director.on_add_activation(&strategy, &target, &context).await?;
 
 ---
 
+## Phase 22: Version Tolerance in Serialization ✅
+
+**Objective**: Comprehensive testing and validation of serialization version tolerance for forward and backward compatibility during rolling upgrades.
+
+**Status**: COMPLETE - 15 new version tolerance tests (11 unit tests + 4 property-based tests) passing.
+
+### Overview
+
+Version tolerance enables safe schema evolution in distributed systems:
+- **Forward compatibility**: Older code can read data from newer code (unknown fields are skipped)
+- **Backward compatibility**: Newer code can read data from older code (missing fields get defaults)
+
+### Implementation Details
+
+The version tolerance mechanism was already implemented in Phase 2 (Binary Serialization):
+- `Reader::skip_field()` handles skipping unknown fields based on wire type
+- `OrleansDeserialize` derive macro generates `_ => reader.skip_field(&field)?` for unrecognized field IDs
+- Fields are initialized with `Default::default()` so missing fields get appropriate defaults
+
+### Test Coverage
+
+- [x] **22.1** Forward compatibility - V2 data deserializes to V1 (unknown fields skipped)
+  - `test_forward_compatibility_skips_unknown_fields`
+  - `test_forward_compatibility_skips_multiple_unknown_fields`
+  - `prop_forward_compatibility_preserves_common_fields`
+
+- [x] **22.2** Backward compatibility - V1 data deserializes to V2 (missing fields get defaults)
+  - `test_backward_compatibility_missing_fields_get_defaults`
+  - `prop_backward_compatibility_preserves_common_fields`
+
+- [x] **22.3** Sparse field IDs with gaps
+  - `test_forward_compatibility_with_sparse_field_ids`
+  - `test_backward_compatibility_with_sparse_field_ids`
+
+- [x] **22.4** Nested struct version tolerance
+  - `test_nested_forward_compatibility`
+  - `test_nested_backward_compatibility`
+  - `prop_nested_version_tolerance`
+
+- [x] **22.5** Field reordering (same IDs, different declaration order)
+  - `test_field_reordering_same_ids`
+  - `prop_field_id_determines_identity`
+
+- [x] **22.6** Empty to non-empty struct evolution
+  - `test_empty_struct_forward_compatibility`
+  - `test_empty_struct_backward_compatibility`
+
+- [x] **22.7** Different wire types for unknown fields
+  - `test_skip_different_wire_types` (VarInt, LengthPrefixed, TagDelimited)
+
+### Tests Location
+```
+orleans-codegen/tests/derive_serialize_tests.rs
+```
+
+### Key Behaviors Validated
+
+| Scenario | Sender Version | Receiver Version | Result |
+|----------|---------------|------------------|--------|
+| Forward compat | V2 (newer) | V1 (older) | Unknown fields skipped, common fields preserved |
+| Backward compat | V1 (older) | V2 (newer) | Missing fields get defaults, common fields preserved |
+| Field reorder | Any | Any | Field IDs determine identity, not declaration order |
+| Nested structs | V2 inner | V1 inner | Nested unknown fields skipped correctly |
+| Sparse IDs | New fields in gaps | Old | Fields in gaps skipped correctly |
+
+---
+
 ## Workspace Structure
 
 ```
@@ -2321,7 +2388,7 @@ The MVP is complete! All core criteria have been achieved:
 6. ✅ **Multi-process support** - Separate OS processes can form a cluster via TCP membership table
    - Verified by: `test_tcp_membership_with_in_process_silos`, `test_three_process_cluster_formation`
 
-7. ✅ **All tests pass** - 1162+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 106 versioning, 62 client, 81 stateless-workers, 119 placement, 40 host including 30 property tests)
+7. ✅ **All tests pass** - 1177+ tests across all crates (120 core, 80 clustering, 54 directory, 20 telemetry, 55 persistence, 33 timers, 64 reminders, 87 filters, 93 observers, 51 streaming, 100 transactions, 106 versioning, 62 client, 81 stateless-workers, 119 placement, 40 host, 39 codegen including 34 property tests)
 
 8. ✅ **Grain persistence** - Grains can persist state durably with optimistic concurrency control
    - Verified by: `orleans-persistence` crate with 49 unit tests and 6 doc tests
@@ -2362,6 +2429,11 @@ The MVP is complete! All core criteria have been achieved:
     - Features: RandomPlacement, HashBasedPlacement, PreferLocalPlacement, ActivationCountBasedPlacement, ResourceOptimizedPlacement
     - Power-of-k-choices algorithm for efficient load balancing
     - Multi-dimensional resource scoring with configurable weights
+
+18. ✅ **Version Tolerance in Serialization** - Forward and backward compatibility for rolling upgrades
+    - Verified by: 15 version tolerance tests (11 unit tests + 4 property-based tests) in `orleans-codegen`
+    - Features: Unknown field skipping, default values for missing fields, nested struct version tolerance
+    - Enables safe schema evolution without breaking existing deployments
 
 ---
 
@@ -2408,6 +2480,8 @@ Phase 19 (Versioning)   ←── Phase 1 (Identity) + Phase 5 (Directory)
 Phase 20 (Stateless Workers) ←── Phase 1 (Identity) + Phase 6 (Runtime) + tokio
 
 Phase 21 (Placement)   ←── Phase 1 (Identity) + Phase 4 (Clustering) + rand
+
+Phase 22 (Version Tolerance) ←── Phase 2 (Serialization) + Phase 7 (Codegen)
 ```
 
 Estimated complexity: ~20,000-28,000 lines of Rust code.
