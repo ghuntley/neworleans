@@ -2128,6 +2128,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "orleans-event-sourcing"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "dashmap",
+ "futures",
+ "orleans-core",
+ "orleans-persistence",
+ "orleans-transactions",
+ "parking_lot",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "orleans-filters"
 version = "0.1.0"
 dependencies = [

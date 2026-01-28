@@ -24,6 +24,7 @@ members = [
     "orleans-migration",
     "orleans-postgres",
     "orleans-persistence-s3",
+    "orleans-event-sourcing",
     "orleans-host",
     "orleans-tests-integration",
 ]
