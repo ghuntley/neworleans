@@ -1,0 +1,24 @@
+[package]
+name = "orleans-migration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Orleans graceful grain migration support with dehydration/rehydration"
+
+[dependencies]
+orleans-core = { path = "../orleans-core" }
+async-trait.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+dashmap.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+bytes.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+proptest.workspace = true

@@ -21,6 +21,7 @@ members = [
     "orleans-stateless-workers",
     "orleans-placement",
     "orleans-security",
+    "orleans-migration",
     "orleans-host",
 ]
 
